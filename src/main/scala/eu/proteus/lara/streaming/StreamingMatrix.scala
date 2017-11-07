@@ -21,9 +21,9 @@ import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.function.AllWindowFunction
 import org.apache.flink.streaming.api.windowing.windows.GlobalWindow
 import org.apache.flink.util.Collector
-import breeze.linalg.{DenseMatrix => BreezeDenseMatrix}
+import breeze.linalg.{DenseMatrix => BreezeDenseMatrix, DenseVector => BreezeDenseVector}
 import org.apache.flink.configuration.Configuration
-import org.apache.flink.streaming.api.functions.co.{CoMapFunction, RichCoFlatMapFunction, RichCoMapFunction}
+import org.apache.flink.streaming.api.functions.co.RichCoFlatMapFunction
 
 import scala.collection.mutable
 
@@ -43,65 +43,88 @@ class StreamingMatrix(
     }), numCols, numRows)
   }
 
-  private[lara] def transformMatrix(that: StreamingMatrix, f: (BreezeDenseMatrix[Double], BreezeDenseMatrix[Double]) => BreezeDenseMatrix[Double]): StreamingMatrix = {
+  private[lara] def transformMatrix(
+    that: StreamingMatrix,
+    f: (BreezeDenseMatrix[Double], BreezeDenseMatrix[Double]) => BreezeDenseMatrix[Double])
+  : StreamingMatrix = {
     // TODO add asserts
-    StreamingMatrix(ds.countWindowAll(numRows).apply(new AllWindowFunction[Array[Double], BreezeDenseMatrix[Double], GlobalWindow] {
-      override def apply(window: GlobalWindow, input: Iterable[Array[Double]], out: Collector[BreezeDenseMatrix[Double]]): Unit = {
-        val data = new Array[Double](numRows * numCols)
-        val ret = BreezeDenseMatrix.create[Double](numRows, numCols, data)
-        for ((row, i) <- input.view.zipWithIndex) {
-          ret(i, ::) := row
-        }
-      }
-    }).connect(that.ds.countWindowAll(that.numRows).apply(new AllWindowFunction[Array[Double], BreezeDenseMatrix[Double], GlobalWindow] {
-      override def apply(window: GlobalWindow, input: Iterable[Array[Double]], out: Collector[BreezeDenseMatrix[Double]]): Unit = {
-        val data = new Array[Double](that.numRows * that.numCols)
-        val ret = BreezeDenseMatrix.create[Double](that.numRows, that.numCols, data)
-        for ((row, i) <- input.view.zipWithIndex) {
-          ret(i, ::) := row
-        }
-      }
-    })).flatMap(new RichCoFlatMapFunction[BreezeDenseMatrix[Double], BreezeDenseMatrix[Double], Array[Double]] {
+    StreamingMatrix(
+      ds
+        .countWindowAll(numRows)
+        .apply(new AllWindowFunction[Array[Double], BreezeDenseMatrix[Double], GlobalWindow] {
+          override def apply(
+              window: GlobalWindow,
+              input: Iterable[Array[Double]],
+              out: Collector[BreezeDenseMatrix[Double]])
+          : Unit = {
+            val data = new Array[Double](numRows * numCols)
+            val ret = BreezeDenseMatrix.create[Double](numRows, numCols, data)
+            for ((row, i) <- input.view.zipWithIndex) {
+              ret(i, ::) := BreezeDenseVector.create[Double](row, 0, 0, numRows).t
+            }
+            out.collect(ret)
+          }
+        })
+        .connect(
+            that.ds
+              .countWindowAll(that.numRows)
+              .apply(new AllWindowFunction[Array[Double], BreezeDenseMatrix[Double], GlobalWindow] {
+                override def apply(
+                    window: GlobalWindow,
+                    input: Iterable[Array[Double]],
+                    out: Collector[BreezeDenseMatrix[Double]])
+                : Unit = {
+                  val data = new Array[Double](that.numRows * that.numCols)
+                  val ret = BreezeDenseMatrix.create[Double](that.numRows, that.numCols, data)
+                  for ((row, i) <- input.view.zipWithIndex) {
+                    ret(i, ::) := BreezeDenseVector.create[Double](row, 0, 0, numRows).t
+                  }
+                  out.collect(ret)
+                }
+              })
+        )
+        .flatMap(new RichCoFlatMapFunction[BreezeDenseMatrix[Double], BreezeDenseMatrix[Double], Array[Double]] {
 
-      @transient var q1: mutable.Queue[BreezeDenseMatrix[Double]] = _
-      @transient var q2: mutable.Queue[BreezeDenseMatrix[Double]] = _
+          // TODO this should be eventually implemented as operator state
+          @transient var q1: mutable.Queue[BreezeDenseMatrix[Double]] = _
+          @transient var q2: mutable.Queue[BreezeDenseMatrix[Double]] = _
 
-      override def open(parameters: Configuration) = {
-        super.open(parameters)
+          override def open(parameters: Configuration) = {
+            super.open(parameters)
 
-        q1 = new mutable.Queue[BreezeDenseMatrix[Double]]()
-        q2 = new mutable.Queue[BreezeDenseMatrix[Double]]()
+            q1 = new mutable.Queue[BreezeDenseMatrix[Double]]()
+            q2 = new mutable.Queue[BreezeDenseMatrix[Double]]()
 
-      }
+          }
 
-      override def flatMap1(in1: BreezeDenseMatrix[Double], collector: Collector[Array[Double]]) = {
+          override def flatMap1(in1: BreezeDenseMatrix[Double], collector: Collector[Array[Double]]) = {
 
-        if (q2.isEmpty) {
-          q1.enqueue(in1)
-        } else {
-          val m2 = q2.dequeue()
-          val res = f(in1, m2)
-          collector.collect(res.data)
-        }
+            if (q2.isEmpty) {
+              q1.enqueue(in1)
+            } else {
+              val m2 = q2.dequeue()
+              val res = f(in1, m2)
+              collector.collect(res.data)
+            }
 
-      }
+          }
 
-      override def flatMap2(in2: BreezeDenseMatrix[Double], collector: Collector[Array[Double]]) = {
+          override def flatMap2(in2: BreezeDenseMatrix[Double], collector: Collector[Array[Double]]) = {
 
-        if (q1.isEmpty) {
-          q2.enqueue(in2)
-        } else {
-          val m1 = q1.dequeue()
-          val res = f(m1, in2)
-          collector.collect(res.data)
-        }
+            if (q1.isEmpty) {
+              q2.enqueue(in2)
+            } else {
+              val m1 = q1.dequeue()
+              val res = f(m1, in2)
+              collector.collect(res.data)
+            }
 
-      }
-
-
-    }), numCols, numRows)
+          }
+        }), numCols, numRows)
   }
 
+
+  // scalastyle:off method.name
 
   //////////////////////////////////////////
   // pointwise M o scalar
@@ -126,6 +149,15 @@ class StreamingMatrix(
 
   def %*%(that: StreamingMatrix): StreamingMatrix = transformMatrix(that, _ * _)
 
+  // scalastyle:on method.name
+
+  //////////////////////////////////////////
+  // extract data stream
+  //////////////////////////////////////////
+
+  def toDataStream = {
+    ds
+  }
 
 }
 
@@ -134,20 +166,22 @@ object StreamingMatrix {
   def apply(
       ds: DataStream[Array[Double]],
       numCols: Int,
-      numRows: Int = 1
+      numRows: Int
    ) : StreamingMatrix = {
     new StreamingMatrix(ds, numCols, numRows)
   }
 
-  def apply(matrix: StreamingMatrix,
+  def apply(
+    matrix: StreamingMatrix,
     numCols: Int,
-    numRows: Int = 1
+    numRows: Int
   ) : StreamingMatrix = {
     new StreamingMatrix(matrix.ds, numCols, numRows)
   }
 
-  def apply(matrix: StreamingMatrix,
-    numRows: Int = 1
+  def apply(
+    matrix: StreamingMatrix,
+    numRows: Int
   ) : StreamingMatrix = {
     new StreamingMatrix(matrix.ds, matrix.numCols, numRows)
   }

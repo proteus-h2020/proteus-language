@@ -16,6 +16,17 @@
 
 package eu.proteus.lara
 
-package object lara {
+import eu.proteus.lara.streaming.StreamingMatrix
+import org.apache.flink.streaming.api.scala._
+
+
+package object overrides {
+
+  implicit def toMatrix(ds: DataStream[Array[Double]]) = new {
+    def toMatrix(n: Int, m: Int) = {
+      StreamingMatrix(ds, n, m)
+    }
+  }
+
 
 }
