@@ -1,2 +1,6 @@
 *.class
 *.log
+.idea/
+lara-streaming_2.11.iml
+target/*
+.idea/*
