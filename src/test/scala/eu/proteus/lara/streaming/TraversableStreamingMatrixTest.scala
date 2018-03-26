@@ -53,7 +53,7 @@ extends FlatSpec
     while (streamIt.hasNext) {
       val data = streamIt.next
       val m = BreezeDenseMatrix.create[Double](2, 2, data)
-      sum(m) should be (10.8)
+      sum(m) should be (12.8)
     }
 
   }
@@ -76,8 +76,8 @@ extends FlatSpec
     val tmp2 = BreezeDenseMatrix.zeros[Double](5, 5)
 
     for (x <- 0 until 5) {
-      tmp1(x, ::) := BreezeDenseVector.create[Double](M1(x), 0, 0, 5).t
-      tmp2(x, ::) := BreezeDenseVector.create[Double](M2(x), 0, 0, 5).t
+      tmp1(x, ::) := BreezeDenseVector.create[Double](M1(x), 0, 1, 5).t
+      tmp2(x, ::) := BreezeDenseVector.create[Double](M2(x), 0, 1, 5).t
     }
 
     val M3 = tmp1 * tmp2
@@ -114,8 +114,8 @@ extends FlatSpec
     val tmp2 = BreezeDenseMatrix.zeros[Double](5, 5)
 
     for (x <- 0 until 5) {
-      tmp1(x, ::) := BreezeDenseVector.create[Double](M1(x), 0, 0, 5).t
-      tmp2(x, ::) := BreezeDenseVector.create[Double](M2(x), 0, 0, 5).t
+      tmp1(x, ::) := BreezeDenseVector.create[Double](M1(x), 0, 1, 5).t
+      tmp2(x, ::) := BreezeDenseVector.create[Double](M2(x), 0, 1, 5).t
     }
 
     val M3 = tmp1 *:* tmp2
@@ -152,8 +152,8 @@ extends FlatSpec
     val tmp2 = BreezeDenseMatrix.zeros[Double](5, 5)
 
     for (x <- 0 until 5) {
-      tmp1(x, ::) := BreezeDenseVector.create[Double](M1(x), 0, 0, 5).t
-      tmp2(x, ::) := BreezeDenseVector.create[Double](M2(x), 0, 0, 5).t
+      tmp1(x, ::) := BreezeDenseVector.create[Double](M1(x), 0, 1, 5).t
+      tmp2(x, ::) := BreezeDenseVector.create[Double](M2(x), 0, 1, 5).t
     }
 
     val M3 = tmp1 +:+ tmp2
@@ -190,8 +190,8 @@ extends FlatSpec
     val tmp2 = BreezeDenseMatrix.zeros[Double](5, 5)
 
     for (x <- 0 until 5) {
-      tmp1(x, ::) := BreezeDenseVector.create[Double](M1(x), 0, 0, 5).t
-      tmp2(x, ::) := BreezeDenseVector.create[Double](M2(x), 0, 0, 5).t
+      tmp1(x, ::) := BreezeDenseVector.create[Double](M1(x), 0, 1, 5).t
+      tmp2(x, ::) := BreezeDenseVector.create[Double](M2(x), 0, 1, 5).t
     }
 
     val M3 = tmp1 -:- tmp2
@@ -228,8 +228,8 @@ extends FlatSpec
     val tmp2 = BreezeDenseMatrix.zeros[Double](5, 5)
 
     for (x <- 0 until 5) {
-      tmp1(x, ::) := BreezeDenseVector.create[Double](M1(x), 0, 0, 5).t
-      tmp2(x, ::) := BreezeDenseVector.create[Double](M2(x), 0, 0, 5).t
+      tmp1(x, ::) := BreezeDenseVector.create[Double](M1(x), 0, 1, 5).t
+      tmp2(x, ::) := BreezeDenseVector.create[Double](M2(x), 0, 1, 5).t
     }
 
     val M3 = tmp1 /:/ tmp2
