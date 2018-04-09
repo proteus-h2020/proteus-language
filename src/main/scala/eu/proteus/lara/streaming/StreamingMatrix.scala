@@ -60,7 +60,7 @@ class StreamingMatrix(
             val data = new Array[Double](numRows * numCols)
             val ret = BreezeDenseMatrix.create[Double](numRows, numCols, data)
             for ((row, i) <- input.view.zipWithIndex) {
-              ret(i, ::) := BreezeDenseVector.create[Double](row, 0, 1, numRows).t
+              ret(i, ::) := BreezeDenseVector.create[Double](row, 0, 1, numCols).t
             }
             out.collect(ret)
           }
@@ -77,7 +77,7 @@ class StreamingMatrix(
                   val data = new Array[Double](that.numRows * that.numCols)
                   val ret = BreezeDenseMatrix.create[Double](that.numRows, that.numCols, data)
                   for ((row, i) <- input.view.zipWithIndex) {
-                    ret(i, ::) := BreezeDenseVector.create[Double](row, 0, 1, numRows).t
+                    ret(i, ::) := BreezeDenseVector.create[Double](row, 0, 1, numCols).t
                   }
                   out.collect(ret)
                 }
@@ -104,7 +104,9 @@ class StreamingMatrix(
             } else {
               val m2 = q2.dequeue()
               val res = f(in1, m2)
-              collector.collect(res.data)
+              val dat = res.t.toArray
+              for (i <- 0 until res.rows)
+                collector.collect(dat.slice(numCols*i, numCols*(i+1)))
             }
 
           }
@@ -116,7 +118,9 @@ class StreamingMatrix(
             } else {
               val m1 = q1.dequeue()
               val res = f(m1, in2)
-              collector.collect(res.data)
+              val dat = res.t.toArray
+              for (i <- 0 until res.rows)
+                collector.collect(dat.slice(numCols*i, numCols*(i+1)))
             }
 
           }
