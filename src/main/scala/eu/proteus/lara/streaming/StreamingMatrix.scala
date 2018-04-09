@@ -33,6 +33,7 @@ class StreamingMatrix(
     private[lara] val numRows: Int = 1
   ) extends Serializable {
 
+
   self =>
 
   private[lara] def mapScalar(scalar: Double, f: (Double, Double) => Double): StreamingMatrix = {
@@ -166,7 +167,7 @@ class StreamingMatrix(
 }
 
 object StreamingMatrix {
-
+  
   def apply(
       ds: DataStream[Array[Double]],
       numCols: Int,

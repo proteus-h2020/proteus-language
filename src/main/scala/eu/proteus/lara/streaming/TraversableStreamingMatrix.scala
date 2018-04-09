@@ -1,5 +1,7 @@
 package eu.proteus.lara.streaming
 
+import org.apache.flink.streaming.api.scala._
+
 
 sealed trait TraversableStreamingMatrix{
   //operator in each vertex
@@ -10,6 +12,24 @@ sealed trait TraversableStreamingMatrix{
 
   //compute the expression represent from this vertex downwardly
   def fuse(): StreamingMatrix
+
+   def +(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
+    new Branch(this, that, '+')
+  }
+   def -(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
+    new Branch(this, that, '-')
+  }
+   def *(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
+    new Branch(this, that, '*')
+  }
+
+  def /(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
+    new Branch(this, that, '/')
+  }
+
+  def %*%(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
+    new Branch(this, that, '%')
+  }
 
 }
 
@@ -24,6 +44,7 @@ case class Leaf(value: StreamingMatrix) extends TraversableStreamingMatrix {
   override def fuse(): StreamingMatrix = value
 
   override def toString: String = op.toString
+
 }
 
 case class Branch(left: TraversableStreamingMatrix, right: TraversableStreamingMatrix, operator: Char) extends TraversableStreamingMatrix{
@@ -38,8 +59,8 @@ case class Branch(left: TraversableStreamingMatrix, right: TraversableStreamingM
   }
 
   override def fuse(): StreamingMatrix = {
-    if (isOptimizable)
-      ??? //TO-DO to add optimization of computation here
+//    if (isOptimizable)
+//      ??? //TO-DO to add optimization of computation here
 
     //else, currently, compute normally
     val l = left.fuse
@@ -55,11 +76,7 @@ case class Branch(left: TraversableStreamingMatrix, right: TraversableStreamingM
     result
   }
 
-  def countNumOptChildren(): Int = {
-    var count = 0
-  //  if ()
-    0
-  }
   override def toString: String = "(" + left.toString + ")" + op + "(" + right.toString + ")"
 
 }
+

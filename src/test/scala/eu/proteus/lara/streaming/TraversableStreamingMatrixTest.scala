@@ -16,12 +16,12 @@
 
 package eu.proteus.lara.streaming
 
+import breeze.linalg.{DenseMatrix => BreezeDenseMatrix, DenseVector => BreezeDenseVector}
 import eu.proteus.lara.overrides._
 import eu.proteus.lara.streaming.flink.FlinkTestBase
+import org.apache.flink.contrib.streaming.scala.utils._
 import org.apache.flink.streaming.api.scala._
 import org.scalatest.{FlatSpec, Matchers}
-import org.apache.flink.contrib.streaming.scala.utils._
-import breeze.linalg.{sum, DenseMatrix => BreezeDenseMatrix, DenseVector => BreezeDenseVector}
 
 class TraversableStreamingMatrixTest
 extends FlatSpec
@@ -30,35 +30,49 @@ extends FlatSpec
 
   behavior of "Traversable Streaming Matrix"
 
-  /**
-    * Wrong result of addition
-    */
-  it should "perform scalar matrix-matrix add operation" in {
+
+  it should "perform matrix-matrix add - multiply operation" in {
 
     val env = StreamExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(4)
     env.setMaxParallelism(4)
+    val m = Array(Array(1.0, 2.2, 3.3), Array(1.0, 2.2, 3.3))
+    val source1 = env.fromCollection(m)
+    val source2 = env.fromCollection(m)
+    val source3 = env.fromCollection(m)
 
-    val source1 = env.fromCollection(Array(Array(1.0, 2.2), Array(1.0, 2.2)))
-    val source2 = env.fromCollection(Array(Array(1.0, 2.2), Array(1.0, 2.2)))
+    val temp1 = BreezeDenseMatrix(m:_*)
+    val M = temp1 *:* temp1 + temp1
+    val result = M.t.toArray
 
-    val matrix1 = StreamingMatrix(source1, 2, 2)
-    val matrix2 = StreamingMatrix(source2, 2, 2)
+    val matrix1 = Leaf(StreamingMatrix(source1, 3, 2))
+    val matrix2 = Leaf(StreamingMatrix(source2, 3, 2))
+    val matrix3 = Leaf(StreamingMatrix(source3, 3, 2))
 
-    val left = Leaf(matrix1)
-    val right = Leaf(matrix2)
+    val matrix123 = matrix1 + matrix2 * matrix3
 
-    val streamIt = Branch(left, right, '+').fuse.toDataStream.collect()
+    //matrix123 should be optimizable
+    assert(matrix123.isOptimizable)
 
+    val streamIt = matrix123.fuse().toDataStream.collect()
+
+    val eps = 1E-5
+    var i = 0
+    var done: Boolean = false
     while (streamIt.hasNext) {
-      val data = streamIt.next
-      val m = BreezeDenseMatrix.create[Double](2, 2, data)
-      sum(m) should be (12.8)
-    }
+      done = true
+      val data = streamIt.next()
+      val err = result.slice(3*i, 3*(i+1))
 
+      for (item <- data zip err) {
+        item._1-item._2 should be (0.0 +- eps)
+      }
+      i+=1
+    }
+    assert(done)
   }
 
-  it should "perform scalar matrix-matrix mult operation" in {
+  it should "perform scalar matrix-matrix complex operation" in {
 
     val env = StreamExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(4)
@@ -67,10 +81,62 @@ extends FlatSpec
     val source1 = env.fromCollection(M1)
     val source2 = env.fromCollection(M2)
 
-    val matrix1 = StreamingMatrix(source1, 5, 5)
-    val matrix2 = source2.toMatrix(5, 5) // alternative  to StreamingMatrix(source2, 5, 5)
+    val matrix1 = Leaf(StreamingMatrix(source1, 5, 5))
+    val matrix2 = Leaf(source2.toMatrix(5, 5)) // alternative  to StreamingMatrix(source2, 5, 5)
 
-    val res = Branch(Leaf(matrix1), Leaf(matrix2), '%').fuse()
+
+    val left = matrix1 + matrix2 * matrix2
+    val right = matrix1 - matrix2
+    val tree = left * right
+    val res = tree.fuse()
+
+    val tmp1 = BreezeDenseMatrix.zeros[Double](5, 5)
+    val tmp2 = BreezeDenseMatrix.zeros[Double](5, 5)
+
+    for (x <- 0 until 5) {
+      tmp1(x, ::) := BreezeDenseVector.create[Double](M1(x), 0, 1, 5).t
+      tmp2(x, ::) := BreezeDenseVector.create[Double](M2(x), 0, 1, 5).t
+    }
+
+    val M3 = (tmp1 + tmp2 *:* tmp2) *:* (tmp1 - tmp2)
+    val result = M3.t.toArray
+    val len = 5
+
+
+    val streamIt = res.toDataStream.collect()
+
+    val eps = 1E-5
+    var i = 0
+    var done: Boolean = false
+    while (streamIt.hasNext) {
+      done = true
+      val data = streamIt.next()
+      val err = result.slice(len*i, len*(i+1))
+
+      for (item <- data zip err) {
+        item._1-item._2 should be (0.0 +- eps)
+      }
+      i+=1
+    }
+    assert(done)
+
+  }
+
+
+  it should "perform matrix-matrix matrixMultiplication operation" in {
+
+    val env = StreamExecutionEnvironment.getExecutionEnvironment
+    env.setParallelism(4)
+    env.setMaxParallelism(4)
+
+    val source1 = env.fromCollection(M1)
+    val source2 = env.fromCollection(M2)
+
+    val matrix1 = Leaf(StreamingMatrix(source1, 5, 5))
+    val matrix2 = Leaf(source2.toMatrix(5, 5)) // alternative  to StreamingMatrix(source2, 5, 5)
+
+    val tree = matrix1 %*% matrix2
+    val res = tree.fuse()
 
     val tmp1 = BreezeDenseMatrix.zeros[Double](5, 5)
     val tmp2 = BreezeDenseMatrix.zeros[Double](5, 5)
@@ -81,170 +147,25 @@ extends FlatSpec
     }
 
     val M3 = tmp1 * tmp2
+    val result = M3.t.toArray
+    val len = 5
 
     val streamIt = res.toDataStream.collect()
 
     val eps = 1E-5
+    var i = 0
+    var done: Boolean = false
     while (streamIt.hasNext) {
+      done = true
       val data = streamIt.next()
-      val m = BreezeDenseMatrix.create[Double](5, 5, data)
-      val err: BreezeDenseMatrix[Double] = m - M3
-      err foreachValue {
-        (x) => x should be (0.0 +- eps)
+      val err = result.slice(len*i, len*(i+1))
+
+      for (item <- data zip err) {
+        item._1-item._2 should be (0.0 +- eps)
       }
+      i+=1
     }
-
-  }
-
-  it should "perform scalar matrix-matrix op-wise mult operation" in {
-
-    val env = StreamExecutionEnvironment.getExecutionEnvironment
-    env.setParallelism(4)
-    env.setMaxParallelism(4)
-
-    val source1 = env.fromCollection(M1)
-    val source2 = env.fromCollection(M2)
-
-    val matrix1 = StreamingMatrix(source1, 5, 5)
-    val matrix2 = source2.toMatrix(5, 5) // alternative  to StreamingMatrix(source2, 5, 5)
-
-    val res = matrix1 * matrix2
-
-    val tmp1 = BreezeDenseMatrix.zeros[Double](5, 5)
-    val tmp2 = BreezeDenseMatrix.zeros[Double](5, 5)
-
-    for (x <- 0 until 5) {
-      tmp1(x, ::) := BreezeDenseVector.create[Double](M1(x), 0, 1, 5).t
-      tmp2(x, ::) := BreezeDenseVector.create[Double](M2(x), 0, 1, 5).t
-    }
-
-    val M3 = tmp1 *:* tmp2
-
-    val streamIt = res.toDataStream.collect()
-
-    val eps = 1E-5
-    while (streamIt.hasNext) {
-      val data = streamIt.next()
-      val m = BreezeDenseMatrix.create[Double](5, 5, data)
-      val err: BreezeDenseMatrix[Double] = m - M3
-      err foreachValue {
-        (x) => x should be (0.0 +- eps)
-      }
-    }
-
-  }
-
-  it should "perform scalar matrix-matrix op-wise add operation" in {
-
-    val env = StreamExecutionEnvironment.getExecutionEnvironment
-    env.setParallelism(4)
-    env.setMaxParallelism(4)
-
-    val source1 = env.fromCollection(M1)
-    val source2 = env.fromCollection(M2)
-
-    val matrix1 = StreamingMatrix(source1, 5, 5)
-    val matrix2 = source2.toMatrix(5, 5) // alternative  to StreamingMatrix(source2, 5, 5)
-
-    val res = matrix1 + matrix2
-
-    val tmp1 = BreezeDenseMatrix.zeros[Double](5, 5)
-    val tmp2 = BreezeDenseMatrix.zeros[Double](5, 5)
-
-    for (x <- 0 until 5) {
-      tmp1(x, ::) := BreezeDenseVector.create[Double](M1(x), 0, 1, 5).t
-      tmp2(x, ::) := BreezeDenseVector.create[Double](M2(x), 0, 1, 5).t
-    }
-
-    val M3 = tmp1 +:+ tmp2
-
-    val streamIt = res.toDataStream.collect()
-
-    val eps = 1E-5
-    while (streamIt.hasNext) {
-      val data = streamIt.next()
-      val m = BreezeDenseMatrix.create[Double](5, 5, data)
-      val err: BreezeDenseMatrix[Double] = m - M3
-      err foreachValue {
-        (x) => x should be (0.0 +- eps)
-      }
-    }
-
-  }
-
-  it should "perform scalar matrix-matrix op-wise sub operation" in {
-
-    val env = StreamExecutionEnvironment.getExecutionEnvironment
-    env.setParallelism(4)
-    env.setMaxParallelism(4)
-
-    val source1 = env.fromCollection(M1)
-    val source2 = env.fromCollection(M2)
-
-    val matrix1 = StreamingMatrix(source1, 5, 5)
-    val matrix2 = source2.toMatrix(5, 5) // alternative  to StreamingMatrix(source2, 5, 5)
-
-    val res = Branch(Leaf(matrix1), Leaf(matrix2), '-').fuse//matrix1 - matrix2
-
-    val tmp1 = BreezeDenseMatrix.zeros[Double](5, 5)
-    val tmp2 = BreezeDenseMatrix.zeros[Double](5, 5)
-
-    for (x <- 0 until 5) {
-      tmp1(x, ::) := BreezeDenseVector.create[Double](M1(x), 0, 1, 5).t
-      tmp2(x, ::) := BreezeDenseVector.create[Double](M2(x), 0, 1, 5).t
-    }
-
-    val M3 = tmp1 -:- tmp2
-
-    val streamIt = res.toDataStream.collect()
-
-    val eps = 1E-5
-    while (streamIt.hasNext) {
-      val data = streamIt.next()
-      val m = BreezeDenseMatrix.create[Double](5, 5, data)
-      val err: BreezeDenseMatrix[Double] = m - M3
-      err foreachValue {
-        (x) => x should be (0.0 +- eps)
-      }
-    }
-
-  }
-
-  it should "perform scalar matrix-matrix op-wise div operation" in {
-
-    val env = StreamExecutionEnvironment.getExecutionEnvironment
-    env.setParallelism(4)
-    env.setMaxParallelism(4)
-
-    val source1 = env.fromCollection(M1)
-    val source2 = env.fromCollection(M2)
-
-    val matrix1 = StreamingMatrix(source1, 5, 5)
-    val matrix2 = source2.toMatrix(5, 5) // alternative  to StreamingMatrix(source2, 5, 5)
-
-    val res = Branch(Leaf(matrix1), Leaf(matrix2), '/').fuse//matrix1 / matrix2
-
-    val tmp1 = BreezeDenseMatrix.zeros[Double](5, 5)
-    val tmp2 = BreezeDenseMatrix.zeros[Double](5, 5)
-
-    for (x <- 0 until 5) {
-      tmp1(x, ::) := BreezeDenseVector.create[Double](M1(x), 0, 1, 5).t
-      tmp2(x, ::) := BreezeDenseVector.create[Double](M2(x), 0, 1, 5).t
-    }
-
-    val M3 = tmp1 /:/ tmp2
-
-    val streamIt = res.toDataStream.collect()
-
-    val eps = 1E-5
-    while (streamIt.hasNext) {
-      val data = streamIt.next()
-      val m = BreezeDenseMatrix.create[Double](5, 5, data)
-      val err: BreezeDenseMatrix[Double] = m - M3
-      err foreachValue {
-        (x) => x should be (0.0 +- eps)
-      }
-    }
+    assert(done)
 
   }
 
