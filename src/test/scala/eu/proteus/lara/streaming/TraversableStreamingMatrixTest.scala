@@ -51,10 +51,8 @@ extends FlatSpec
 
     val matrix123 = matrix1 + matrix2 * matrix3
 
-    //matrix123 should be optimizable
-    assert(matrix123.isOptimizable)
 
-    val streamIt = matrix123.fuse().toDataStream.collect()
+    val streamIt = matrix123.toDataStream.collect()
 
     val eps = 1E-5
     var i = 0
@@ -87,8 +85,7 @@ extends FlatSpec
 
     val left = matrix1 + matrix2 * matrix2
     val right = matrix1 - matrix2
-    val tree = left * right
-    val res = tree.fuse()
+    val res = left * right
 
     val tmp1 = BreezeDenseMatrix.zeros[Double](5, 5)
     val tmp2 = BreezeDenseMatrix.zeros[Double](5, 5)
@@ -135,8 +132,7 @@ extends FlatSpec
     val matrix1 = Leaf(StreamingMatrix(source1, 5, 5))
     val matrix2 = Leaf(source2.toMatrix(5, 5)) // alternative  to StreamingMatrix(source2, 5, 5)
 
-    val tree = matrix1 %*% matrix2
-    val res = tree.fuse()
+    val res = matrix1 %*% matrix2
 
     val tmp1 = BreezeDenseMatrix.zeros[Double](5, 5)
     val tmp2 = BreezeDenseMatrix.zeros[Double](5, 5)
