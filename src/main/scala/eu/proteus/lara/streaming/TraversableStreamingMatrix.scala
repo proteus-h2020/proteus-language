@@ -8,27 +8,34 @@ sealed trait TraversableStreamingMatrix{
   var op: Char
 
   //checking if this node can be computed in an optimized way. Currently, by checking if it is an add operator with child-op = mult
-  def isOptimizable: Boolean
+  protected[streaming] def isOptimizable: Boolean
 
   //compute the expression represent from this vertex downwardly
-  def fuse(): StreamingMatrix
+  protected[streaming] def fuse(): StreamingMatrix
 
-   def +(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
-    new Branch(this, that, '+')
+  //to datastream
+  def toDataStream : DataStream[Array[Double]] = {
+    fuse() toDataStream
   }
-   def -(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
-    new Branch(this, that, '-')
+
+  def +(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
+     Branch(this, that, '+')
   }
-   def *(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
-    new Branch(this, that, '*')
+
+  def -(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
+     Branch(this, that, '-')
+  }
+
+  def *(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
+     Branch(this, that, '*')
   }
 
   def /(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
-    new Branch(this, that, '/')
+     Branch(this, that, '/')
   }
 
   def %*%(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
-    new Branch(this, that, '%')
+     Branch(this, that, '%')
   }
 
 }
@@ -36,7 +43,7 @@ sealed trait TraversableStreamingMatrix{
 
 case class Leaf(value: StreamingMatrix) extends TraversableStreamingMatrix {
 
-  def isOptimizable(): Boolean = false
+  override def isOptimizable(): Boolean = false
 
   //identity op, consider changing it to load matrix from stream
   var op: Char = 'i'
@@ -45,12 +52,13 @@ case class Leaf(value: StreamingMatrix) extends TraversableStreamingMatrix {
 
   override def toString: String = op.toString
 
+
 }
 
 case class Branch(left: TraversableStreamingMatrix, right: TraversableStreamingMatrix, operator: Char) extends TraversableStreamingMatrix{
   var op: Char = operator
 
-  def isOptimizable(): Boolean = {
+  override def isOptimizable(): Boolean = {
     if (op == '+')
       if( left.op == '*' || right.op == '*') true
       else false
@@ -58,13 +66,13 @@ case class Branch(left: TraversableStreamingMatrix, right: TraversableStreamingM
         false
   }
 
-  override def fuse(): StreamingMatrix = {
+   override def fuse(): StreamingMatrix = {
 //    if (isOptimizable)
-//      ??? //TO-DO to add optimization of computation here
+//      ??? //add some optimization of computation here
 
     //else, currently, compute normally
-    val l = left.fuse
-    val r = right.fuse
+    val l = left.fuse()
+    val r = right.fuse()
 
     val result = op match{
       case '+' => l + r
