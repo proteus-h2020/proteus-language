@@ -45,9 +45,9 @@ extends FlatSpec
     val M = temp1 *:* temp1 + temp1
     val result = M.t.toArray
 
-    val matrix1 = Leaf(StreamingMatrix(source1, 3, 2))
-    val matrix2 = Leaf(StreamingMatrix(source2, 3, 2))
-    val matrix3 = Leaf(StreamingMatrix(source3, 3, 2))
+    val matrix1 = StreamingMatrix(source1, 3, 2)
+    val matrix2 = StreamingMatrix(source2, 3, 2)
+    val matrix3 = StreamingMatrix(source3, 3, 2)
 
     val matrix123 = matrix1 + matrix2 * matrix3
 
@@ -79,8 +79,8 @@ extends FlatSpec
     val source1 = env.fromCollection(M1)
     val source2 = env.fromCollection(M2)
 
-    val matrix1 = Leaf(StreamingMatrix(source1, 5, 5))
-    val matrix2 = Leaf(source2.toMatrix(5, 5)) // alternative  to StreamingMatrix(source2, 5, 5)
+    val matrix1 = StreamingMatrix(source1, 5, 5)
+    val matrix2 = source2.toMatrix(5, 5) // alternative  to StreamingMatrix(source2, 5, 5)
 
 
     val left = matrix1 + matrix2 * matrix2
@@ -129,8 +129,8 @@ extends FlatSpec
     val source1 = env.fromCollection(M1)
     val source2 = env.fromCollection(M2)
 
-    val matrix1 = Leaf(StreamingMatrix(source1, 5, 5))
-    val matrix2 = Leaf(source2.toMatrix(5, 5)) // alternative  to StreamingMatrix(source2, 5, 5)
+    val matrix1 = StreamingMatrix(source1, 5, 5)
+    val matrix2 = source2.toMatrix(5, 5) // alternative  to StreamingMatrix(source2, 5, 5)
 
     val res = matrix1 %*% matrix2
 

@@ -18,25 +18,25 @@ sealed trait TraversableStreamingMatrix{
     fuse() toDataStream
   }
 
-  def +(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
-     Branch(this, that, '+')
-  }
-
-  def -(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
-     Branch(this, that, '-')
-  }
-
-  def *(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
-     Branch(this, that, '*')
-  }
-
-  def /(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
-     Branch(this, that, '/')
-  }
-
-  def %*%(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
-     Branch(this, that, '%')
-  }
+//  def +(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
+//     Branch(this, that, '+')
+//  }
+//
+//  def -(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
+//     Branch(this, that, '-')
+//  }
+//
+//  def *(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
+//     Branch(this, that, '*')
+//  }
+//
+//  def /(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
+//     Branch(this, that, '/')
+//  }
+//
+//  def %*%(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
+//     Branch(this, that, '%')
+//  }
 
 }
 
@@ -75,11 +75,11 @@ case class Branch(left: TraversableStreamingMatrix, right: TraversableStreamingM
     val r = right.fuse()
 
     val result = op match{
-      case '+' => l + r
-      case '-' => l - r
-      case '*' => l * r
-      case '/' => l / r
-      case '%' => l %*% r
+      case '+' => l.transformMatrix(r, _ +:+ _)
+      case '-' => l.transformMatrix(r, _ -:- _)
+      case '*' => l.transformMatrix(r, _ *:* _)
+      case '/' => l.transformMatrix(r, _ /:/ _)
+      case '%' => l.transformMatrix(r, _ * _)
     }
     result
   }

@@ -33,8 +33,10 @@ class StreamingMatrix(
     private[lara] val numRows: Int = 1
   ) extends Serializable {
 
-
   self =>
+
+  private[lara] var tree: TraversableStreamingMatrix = Leaf(this)
+
 
   private[lara] def mapScalar(scalar: Double, f: (Double, Double) => Double): StreamingMatrix = {
     StreamingMatrix(ds.map(new MapFunction[Array[Double], Array[Double]] {
@@ -144,15 +146,48 @@ class StreamingMatrix(
   // pointwise M o placeholder
   //////////////////////////////////////////
 
-  def +(that: StreamingMatrix): StreamingMatrix = transformMatrix(that, _ +:+ _)
+//  def +(that: StreamingMatrix): StreamingMatrix = transformMatrix(that, _ +:+ _)
+//
+//  def -(that: StreamingMatrix): StreamingMatrix = transformMatrix(that, _ -:- _)
+//
+//  def *(that: StreamingMatrix): StreamingMatrix = transformMatrix(that, _ *:* _)
+//
+//  def /(that: StreamingMatrix): StreamingMatrix = transformMatrix(that, _ /:/ _)
+//
+//  def %*%(that: StreamingMatrix): StreamingMatrix = transformMatrix(that, _ * _)
 
-  def -(that: StreamingMatrix): StreamingMatrix = transformMatrix(that, _ -:- _)
 
-  def *(that: StreamingMatrix): StreamingMatrix = transformMatrix(that, _ *:* _)
+  def +(that: StreamingMatrix): StreamingMatrix = {
+    val res = StreamingMatrix(ds=null, numCols, numRows)
+    res.tree = Branch(this.tree, that.tree, '+')
+    res
+  }
 
-  def /(that: StreamingMatrix): StreamingMatrix = transformMatrix(that, _ /:/ _)
+  def -(that: StreamingMatrix): StreamingMatrix = {
+    val res = StreamingMatrix(ds=null, numCols, numRows)
+    res.tree = Branch(this.tree, that.tree, '-')
+    res
+  }
 
-  def %*%(that: StreamingMatrix): StreamingMatrix = transformMatrix(that, _ * _)
+  def *(that: StreamingMatrix): StreamingMatrix = {
+    val res = StreamingMatrix(ds=null, numCols, numRows)
+    res.tree = Branch(this.tree, that.tree, '*')
+    res
+  }
+
+  def /(that: StreamingMatrix): StreamingMatrix = {
+    val res = StreamingMatrix(ds=null, numCols, numRows)
+    res.tree = Branch(this.tree, that.tree, '/')
+    res
+  }
+
+  def %*%(that: StreamingMatrix): StreamingMatrix = {
+    val res = StreamingMatrix(ds=null, numCols, numRows)
+    res.tree = Branch(this.tree, that.tree, '%')
+    res
+  }
+
+
 
   // scalastyle:on method.name
 
@@ -161,7 +196,7 @@ class StreamingMatrix(
   //////////////////////////////////////////
 
   def toDataStream = {
-    ds
+    tree.fuse().ds
   }
 
 }
