@@ -1,11 +1,11 @@
 package eu.proteus.lara.streaming
 
+import MatrixOp.{MatrixOp, _}
 import org.apache.flink.streaming.api.scala._
-
 
 sealed trait TraversableStreamingMatrix{
   //operator in each vertex
-  var op: Char
+  var op: MatrixOp
 
   //checking if this node can be computed in an optimized way. Currently, by checking if it is an add operator with child-op = mult
   protected[streaming] def isOptimizable: Boolean
@@ -18,26 +18,6 @@ sealed trait TraversableStreamingMatrix{
     fuse() toDataStream
   }
 
-//  def +(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
-//     Branch(this, that, '+')
-//  }
-//
-//  def -(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
-//     Branch(this, that, '-')
-//  }
-//
-//  def *(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
-//     Branch(this, that, '*')
-//  }
-//
-//  def /(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
-//     Branch(this, that, '/')
-//  }
-//
-//  def %*%(that: TraversableStreamingMatrix): TraversableStreamingMatrix = {
-//     Branch(this, that, '%')
-//  }
-
 }
 
 
@@ -46,7 +26,7 @@ case class Leaf(value: StreamingMatrix) extends TraversableStreamingMatrix {
   override def isOptimizable(): Boolean = false
 
   //identity op, consider changing it to load matrix from stream
-  var op: Char = 'i'
+  var op: MatrixOp = load
 
   override def fuse(): StreamingMatrix = value
 
@@ -55,31 +35,27 @@ case class Leaf(value: StreamingMatrix) extends TraversableStreamingMatrix {
 
 }
 
-case class Branch(left: TraversableStreamingMatrix, right: TraversableStreamingMatrix, operator: Char) extends TraversableStreamingMatrix{
-  var op: Char = operator
+case class Branch(left: TraversableStreamingMatrix, right: TraversableStreamingMatrix, operator: MatrixOp) extends TraversableStreamingMatrix{
+  var op: MatrixOp = operator
 
-  override def isOptimizable(): Boolean = {
-    if (op == '+')
-      if( left.op == '*' || right.op == '*') true
+  override def isOptimizable: Boolean = {
+    if (op == MatrixOp.+)
+      if( left.op == * || right.op == *) true
       else false
     else
         false
   }
 
    override def fuse(): StreamingMatrix = {
-//    if (isOptimizable)
-//      ??? //add some optimization of computation here
-
-    //else, currently, compute normally
     val l = left.fuse()
     val r = right.fuse()
 
     val result = op match{
-      case '+' => l.transformMatrix(r, _ +:+ _)
-      case '-' => l.transformMatrix(r, _ -:- _)
-      case '*' => l.transformMatrix(r, _ *:* _)
-      case '/' => l.transformMatrix(r, _ /:/ _)
-      case '%' => l.transformMatrix(r, _ * _)
+      case + => l.transformMatrix(r, _ +:+ _)
+      case - => l.transformMatrix(r, _ -:- _)
+      case * => l.transformMatrix(r, _ *:* _)
+      case / => l.transformMatrix(r, _ /:/ _)
+      case %*% => l.transformMatrix(r, _ * _)
     }
     result
   }

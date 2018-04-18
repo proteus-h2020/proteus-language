@@ -16,14 +16,15 @@
 
 package eu.proteus.lara.streaming
 
+import breeze.linalg.{DenseMatrix => BreezeDenseMatrix, DenseVector => BreezeDenseVector}
+import eu.proteus.lara.streaming.MatrixOp._
 import org.apache.flink.api.common.functions.MapFunction
+import org.apache.flink.configuration.Configuration
+import org.apache.flink.streaming.api.functions.co.RichCoFlatMapFunction
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.scala.function.AllWindowFunction
 import org.apache.flink.streaming.api.windowing.windows.GlobalWindow
 import org.apache.flink.util.Collector
-import breeze.linalg.{DenseMatrix => BreezeDenseMatrix, DenseVector => BreezeDenseVector}
-import org.apache.flink.configuration.Configuration
-import org.apache.flink.streaming.api.functions.co.RichCoFlatMapFunction
 
 import scala.collection.mutable
 
@@ -146,48 +147,32 @@ class StreamingMatrix(
   // pointwise M o placeholder
   //////////////////////////////////////////
 
-//  def +(that: StreamingMatrix): StreamingMatrix = transformMatrix(that, _ +:+ _)
-//
-//  def -(that: StreamingMatrix): StreamingMatrix = transformMatrix(that, _ -:- _)
-//
-//  def *(that: StreamingMatrix): StreamingMatrix = transformMatrix(that, _ *:* _)
-//
-//  def /(that: StreamingMatrix): StreamingMatrix = transformMatrix(that, _ /:/ _)
-//
-//  def %*%(that: StreamingMatrix): StreamingMatrix = transformMatrix(that, _ * _)
-
 
   def +(that: StreamingMatrix): StreamingMatrix = {
-    val res = StreamingMatrix(ds=null, numCols, numRows)
-    res.tree = Branch(this.tree, that.tree, '+')
-    res
+    computeMatrixExpression(that, MatrixOp.+)
   }
 
   def -(that: StreamingMatrix): StreamingMatrix = {
-    val res = StreamingMatrix(ds=null, numCols, numRows)
-    res.tree = Branch(this.tree, that.tree, '-')
-    res
+    computeMatrixExpression(that, MatrixOp.-)
   }
 
   def *(that: StreamingMatrix): StreamingMatrix = {
-    val res = StreamingMatrix(ds=null, numCols, numRows)
-    res.tree = Branch(this.tree, that.tree, '*')
-    res
+    computeMatrixExpression(that, MatrixOp.*)
   }
 
   def /(that: StreamingMatrix): StreamingMatrix = {
-    val res = StreamingMatrix(ds=null, numCols, numRows)
-    res.tree = Branch(this.tree, that.tree, '/')
-    res
+    computeMatrixExpression(that, MatrixOp./)
   }
 
   def %*%(that: StreamingMatrix): StreamingMatrix = {
-    val res = StreamingMatrix(ds=null, numCols, numRows)
-    res.tree = Branch(this.tree, that.tree, '%')
-    res
+    computeMatrixExpression(that, MatrixOp.%*%)
   }
 
-
+  private def computeMatrixExpression(that: StreamingMatrix, op: MatrixOp): StreamingMatrix = {
+    val res = StreamingMatrix(ds=null, numCols, numRows)
+    res.tree = Branch(this.tree, that.tree, op)
+    res
+  }
 
   // scalastyle:on method.name
 
@@ -196,7 +181,9 @@ class StreamingMatrix(
   //////////////////////////////////////////
 
   def toDataStream = {
-    tree.fuse().ds
+    val sm = tree.fuse()
+    tree = Leaf(sm)
+    sm.ds
   }
 
 }

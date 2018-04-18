@@ -53,6 +53,9 @@ extends FlatSpec
 
 
     val streamIt = matrix123.toDataStream.collect()
+//    Thread.sleep(200)
+//    val anotherStreamIt = (matrix123 + matrix3).toDataStream.collect()
+//    val hi = anotherStreamIt.toDataStream.collect()
 
     val eps = 1E-5
     var i = 0
