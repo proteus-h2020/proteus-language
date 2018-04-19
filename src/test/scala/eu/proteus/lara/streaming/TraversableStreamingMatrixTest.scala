@@ -53,9 +53,6 @@ extends FlatSpec
 
 
     val streamIt = matrix123.toDataStream.collect()
-//    Thread.sleep(200)
-//    val anotherStreamIt = (matrix123 + matrix3).toDataStream.collect()
-//    val hi = anotherStreamIt.toDataStream.collect()
 
     val eps = 1E-5
     var i = 0
@@ -84,10 +81,13 @@ extends FlatSpec
 
     val matrix1 = StreamingMatrix(source1, 5, 5)
     val matrix2 = source2.toMatrix(5, 5) // alternative  to StreamingMatrix(source2, 5, 5)
+    val matrix3 = source2.toMatrix(5, 5) // alternative  to StreamingMatrix(source2, 5, 5)
+    val matrix4 = source2.toMatrix(5, 5) // alternative  to StreamingMatrix(source2, 5, 5)
+    val matrix5 = source1.toMatrix(5, 5) // alternative  to StreamingMatrix(source2, 5, 5)
 
 
-    val left = matrix1 + matrix2 * matrix2
-    val right = matrix1 - matrix2
+    val left = matrix1 + matrix2 * matrix3
+    val right = matrix5 - matrix4
     val res = left * right
 
     val tmp1 = BreezeDenseMatrix.zeros[Double](5, 5)
@@ -104,7 +104,6 @@ extends FlatSpec
 
 
     val streamIt = res.toDataStream.collect()
-
     val eps = 1E-5
     var i = 0
     var done: Boolean = false
@@ -185,5 +184,27 @@ extends FlatSpec
     Array(3.024786, 21.8026119, 11.651798, 34.974341, 5.005692)
   )
 
+  /*
+   ******************************************************************************************************************************************************************
+   ******************************************************************************************************************************************************************
+                                                                        TEST FOR OPTIMIZATION
+   ******************************************************************************************************************************************************************
+   ******************************************************************************************************************************************************************
+   */
 
+//  it should "compute M1+M2+M3 in an optimized way" in{
+//    val env = StreamExecutionEnvironment.getExecutionEnvironment
+//    env.setParallelism(4)
+//    env.setMaxParallelism(4)
+//
+//    val source1 = env.fromCollection(M1)
+//    val source2 = env.fromCollection(M2)
+//
+//    val matrix1 = StreamingMatrix(source1, 5, 5)
+//    val matrix2 = source2.toMatrix(5, 5) // alternative  to StreamingMatrix(source2, 5, 5)
+//
+//    val id = matrix1.tree
+//
+//
+//  }
 }
