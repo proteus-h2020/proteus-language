@@ -35,7 +35,7 @@ extends FlatSpec
 
     val env = StreamExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(4)
-    env.setMaxParallelism(4)
+//    env.setMaxParallelism(4)
     val m = Array(Array(1.0, 2.2, 3.3), Array(1.0, 2.2, 3.3))
     val source1 = env.fromCollection(m)
     val source2 = env.fromCollection(m)
@@ -51,7 +51,6 @@ extends FlatSpec
 
     val matrix123 = matrix1 + matrix2 * matrix3
 
-
     val streamIt = matrix123.toDataStream.collect()
 
     val eps = 1E-5
@@ -62,7 +61,7 @@ extends FlatSpec
       val data = streamIt.next()
       val err = result.slice(3*i, 3*(i+1))
 
-      for (item <- data zip err) {
+      for (item <- (data zip err)) {
         item._1-item._2 should be (0.0 +- eps)
       }
       i+=1
@@ -74,20 +73,16 @@ extends FlatSpec
 
     val env = StreamExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(4)
-    env.setMaxParallelism(4)
+//    env.setMaxParallelism(4
 
     val source1 = env.fromCollection(M1)
     val source2 = env.fromCollection(M2)
 
     val matrix1 = StreamingMatrix(source1, 5, 5)
     val matrix2 = source2.toMatrix(5, 5) // alternative  to StreamingMatrix(source2, 5, 5)
-    val matrix3 = source2.toMatrix(5, 5) // alternative  to StreamingMatrix(source2, 5, 5)
-    val matrix4 = source2.toMatrix(5, 5) // alternative  to StreamingMatrix(source2, 5, 5)
-    val matrix5 = source1.toMatrix(5, 5) // alternative  to StreamingMatrix(source2, 5, 5)
 
-
-    val left = matrix1 + matrix2 * matrix3
-    val right = matrix5 - matrix4
+    val left = matrix1 + matrix2 * matrix2
+    val right = matrix1 - matrix2
     val res = left * right
 
     val tmp1 = BreezeDenseMatrix.zeros[Double](5, 5)
@@ -112,7 +107,7 @@ extends FlatSpec
       val data = streamIt.next()
       val err = result.slice(len*i, len*(i+1))
 
-      for (item <- data zip err) {
+      for (item <- (data zip err)) {
         item._1-item._2 should be (0.0 +- eps)
       }
       i+=1
@@ -125,8 +120,8 @@ extends FlatSpec
   it should "perform matrix-matrix matrixMultiplication operation" in {
 
     val env = StreamExecutionEnvironment.getExecutionEnvironment
-    env.setParallelism(4)
-    env.setMaxParallelism(4)
+    env.setParallelism(1)
+//    env.setMaxParallelism(4)
 
     val source1 = env.fromCollection(M1)
     val source2 = env.fromCollection(M2)
@@ -158,7 +153,7 @@ extends FlatSpec
       val data = streamIt.next()
       val err = result.slice(len*i, len*(i+1))
 
-      for (item <- data zip err) {
+      for (item <- (data zip err)) {
         item._1-item._2 should be (0.0 +- eps)
       }
       i+=1
@@ -184,27 +179,4 @@ extends FlatSpec
     Array(3.024786, 21.8026119, 11.651798, 34.974341, 5.005692)
   )
 
-  /*
-   ******************************************************************************************************************************************************************
-   ******************************************************************************************************************************************************************
-                                                                        TEST FOR OPTIMIZATION
-   ******************************************************************************************************************************************************************
-   ******************************************************************************************************************************************************************
-   */
-
-//  it should "compute M1+M2+M3 in an optimized way" in{
-//    val env = StreamExecutionEnvironment.getExecutionEnvironment
-//    env.setParallelism(4)
-//    env.setMaxParallelism(4)
-//
-//    val source1 = env.fromCollection(M1)
-//    val source2 = env.fromCollection(M2)
-//
-//    val matrix1 = StreamingMatrix(source1, 5, 5)
-//    val matrix2 = source2.toMatrix(5, 5) // alternative  to StreamingMatrix(source2, 5, 5)
-//
-//    val id = matrix1.tree
-//
-//
-//  }
 }
