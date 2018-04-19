@@ -5,7 +5,9 @@ import breeze.linalg.{DenseMatrix, NumericOps}
 import org.apache.flink.streaming.api.scala._
 
 sealed trait TraversableStreamingMatrix{
+
   val id: Int
+
   //operator in each vertex
   var op: MatrixOp
 
@@ -54,17 +56,14 @@ case class Branch(left: TraversableStreamingMatrix, right: TraversableStreamingM
   var op: MatrixOp = operator
 
   override def isOptimizable: Boolean = {
-//    if (op == MatrixOp.+)
       if( left.op != load || right.op != load) true
       else false
-//    else
-//        false
   }
 
    override def fuse(): StreamingMatrix = {
-
-    if (isOptimizable){
+     if (isOptimizable){
       //left-optimizable
+
       if (left.op != load){
         val leftBranch = left.asInstanceOf[Branch]
         val leftBranch_left = leftBranch.left.fuse()
@@ -99,10 +98,10 @@ case class Branch(left: TraversableStreamingMatrix, right: TraversableStreamingM
   override def toString: String = "(" + left.toString + ")" + op + "(" + right.toString + ")"
 
 
-  def convert(matrixOp: MatrixOp)(): (DenseMatrix[Double], DenseMatrix[Double]) => DenseMatrix[Double] = {
+  private def convert(matrixOp: MatrixOp)(): (DenseMatrix[Double], DenseMatrix[Double]) => DenseMatrix[Double] = {
     matrixOp match {
       case MatrixOp.+ => _ +:+ _
-      case MatrixOp.- => _ +:+ _
+      case MatrixOp.- => _ -:- _
       case MatrixOp.* => _ *:* _
       case MatrixOp./ => _ /:/ _
       case MatrixOp.%*% => _ * _

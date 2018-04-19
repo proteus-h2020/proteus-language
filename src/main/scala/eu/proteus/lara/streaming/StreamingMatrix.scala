@@ -191,46 +191,8 @@ class StreamingMatrix(
                   }
                 })
             )
-//        .union(
-//          sm3.ds
-//            .countWindowAll(sm3.numRows)
-//            .apply(new AllWindowFunction[Array[Double], (BreezeDenseMatrix[Double], Int), GlobalWindow] {
-//              override def apply(
-//                                  window: GlobalWindow,
-//                                  input: Iterable[Array[Double]],
-//                                  out: Collector[(BreezeDenseMatrix[Double], Int)])
-//              : Unit = {
-//                val data = new Array[Double](sm3.numRows * sm3.numCols)
-//                val ret = BreezeDenseMatrix.create[Double](sm3.numRows, sm3.numCols, data)
-//                for ((row, i) <- input.view.zipWithIndex) {
-//                  ret(i, ::) := BreezeDenseVector.create[Double](row, 0, 1, numCols).t
-//                }
-//                out.collect((ret, sm3.tree.id))
-//              }
-//            })
-//        )
-//        .flatMap(new RichFlatMapFunction[(BreezeDenseMatrix[Double], Int), Array[Double]] {
-//          @transient var q1: mutable.Queue[(BreezeDenseMatrix[Double], Int)] = _
-//          @transient var q2: mutable.Queue[(BreezeDenseMatrix[Double], Int)] = _
-//          @transient var q3: mutable.Queue[(BreezeDenseMatrix[Double], Int)] = _
-//
-//          override def open(parameters: Configuration) = {
-//            super.open(parameters)
-//
-//            q1 = new mutable.Queue[(BreezeDenseMatrix[Double], Int)]()
-//            q2 = new mutable.Queue[(BreezeDenseMatrix[Double], Int)]()
-//            q3 = new mutable.Queue[(BreezeDenseMatrix[Double], Int)]()
-//
-//          }
-
-//          override def flatMap(in: (BreezeDenseMatrix[Double], Int), collector: Collector[Array[Double]]): Unit = {
-//
-//          }
-//        }), numCols, numRows)
-
         .flatMap(new RichCoFlatMapFunction[(BreezeDenseMatrix[Double], Int), (BreezeDenseMatrix[Double], Int), Array[Double]] {
 
-          // TODO this should be eventually implemented as operator state
           @transient var q1: mutable.Queue[(BreezeDenseMatrix[Double], Int)] = _
           @transient var q2: mutable.Queue[(BreezeDenseMatrix[Double], Int)] = _
           @transient var q12: mutable.Queue[BreezeDenseMatrix[Double]] = _
@@ -259,7 +221,6 @@ class StreamingMatrix(
           }
 
           override def flatMap1(in: (BreezeDenseMatrix[Double], Int), collector: Collector[Array[Double]]): Unit = {
-            if (q3.isEmpty || q12.isEmpty) {
               if (in._2 == sm2.tree.id)
                 q2.enqueue(in)
               else
@@ -268,25 +229,17 @@ class StreamingMatrix(
               if (q1.nonEmpty && q2.nonEmpty){
                 val m1 = q1.dequeue()
                 val m2 = q2.dequeue()
-                val res = f12(m1._1, m2._1)
-                q12.enqueue(res)
+                val m12 = f12(m1._1, m2._1)
+
+                if (q3.nonEmpty) {
+                  val res = f123(m12, q3.dequeue()._1)
+                  val dat = res.t.toArray
+                  for (i <- 0 until res.rows)
+                    collector.collect(dat.slice(numCols * i, numCols * (i + 1)))
+                }
+                else
+                  q12.enqueue(m12)
               }
-
-            } else {
-//              if (q1.nonEmpty && q2.nonEmpty){
-//                val m1 = q1.dequeue()
-//                val m2 = q2.dequeue()
-//                val res = f12(m1._1, m2._1)
-//                q12.enqueue(res)
-//              }
-
-              val m12 = q12.dequeue()
-              val res = f123(m12, in._1)
-              val dat = res.t.toArray
-              for (i <- 0 until res.rows)
-                collector.collect(dat.slice(numCols*i, numCols*(i +1)))
-            }
-
           }
         }), numCols, numRows)
        
