@@ -120,7 +120,7 @@ extends FlatSpec
   it should "perform matrix-matrix matrixMultiplication operation" in {
 
     val env = StreamExecutionEnvironment.getExecutionEnvironment
-    env.setParallelism(1)
+    env.setParallelism(4)
 //    env.setMaxParallelism(4)
 
     val source1 = env.fromCollection(M1)
