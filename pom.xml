@@ -160,6 +160,12 @@
 		</dependency>
 
 		<dependency>
+			<groupId>hu.sztaki.ilab</groupId>
+			<artifactId>flink-ps_2.11</artifactId>
+			<version>0.1.0</version>
+		</dependency>
+
+		<dependency>
 			<groupId>org.scalanlp</groupId>
 			<artifactId>breeze_${scala.binary.version}</artifactId>
 			<version>${breeze.version}</version>
