@@ -16,16 +16,14 @@
 
 package eu.proteus.lara
 
+import breeze.linalg.{DenseMatrix => BreezeDenseMatrix, DenseVector => BreezeDenseVector}
+import eu.proteus.lara.overrides.IndexedDenseVector
 import eu.proteus.lara.streaming.StreamingMatrix
-import hu.sztaki.ilab.ps.{FlinkParameterServer, ParameterServerClient, WorkerLogic}
 import hu.sztaki.ilab.ps.entities.{PSToWorker, Pull, Push, WorkerToPS}
 import hu.sztaki.ilab.ps.server.RangePSLogicWithClose
-import org.apache.flink.streaming.api.scala._
-import breeze.linalg.{DenseMatrix => BreezeDenseMatrix, DenseVector => BreezeDenseVector}
-import hu.sztaki.ilab.ps.matrix.factorization.utils.EOF
+import hu.sztaki.ilab.ps.{FlinkParameterServer, ParameterServerClient, WorkerLogic}
 import org.apache.flink.api.common.typeinfo.TypeInformation
-import org.apache.flink.streaming.api.functions.co.CoFlatMapFunction
-import org.apache.flink.util.Collector
+import org.apache.flink.streaming.api.scala._
 
 import scala.collection.mutable
 import scala.reflect.ClassTag
@@ -41,7 +39,7 @@ package object overrides {
 
   implicit def asBreeze(ds: DataStream[Array[Double]]) = new {
     def asBreezeVectors = {
-      ds.map(x => (0l, BreezeDenseVector(x)))
+      ds.map(x => (0L, BreezeDenseVector(x)))
     }
   }
 
@@ -53,8 +51,8 @@ package object overrides {
 
   def withFeedback[ModelType : ClassTag : TypeInformation](
     env: StreamExecutionEnvironment,
-    input: StreamingMatrix,
-    labels: StreamingMatrix,
+    mixedStream: DataStream[Either[IndexedDenseVector, IndexedDenseVector]],
+    featureCount: Int,
     model: ModelType
   )(
     predictAndTrain: (DenseVector, ModelType) => (DenseVector, ModelType),
@@ -62,22 +60,7 @@ package object overrides {
     update: (DenseVector, DenseVector, ModelType) => ModelType
   ): DataStream[Either[(DenseVector, DenseVector), (Int, ModelType)]] = {
 
-    val inputStream = input.toDataStream.asBreezeVectors
-    val labelStream = labels.toDataStream.asBreezeVectors
     val modelStream = env.fromCollection(List(model))
-
-    val mixedStream = inputStream
-      .connect(labelStream)
-      .flatMap(new CoFlatMapFunction[IndexedDenseVector, IndexedDenseVector, Either[IndexedDenseVector, IndexedDenseVector]] {
-        override def flatMap1(x: IndexedDenseVector, out: Collector[Either[IndexedDenseVector, IndexedDenseVector]]): Unit = {
-          out.collect(Left(x))
-        }
-
-        override def flatMap2(y: IndexedDenseVector, out: Collector[Either[IndexedDenseVector, IndexedDenseVector]]): Unit = {
-          out.collect(Right(y))
-        }
-      }
-    )
 
     def rangePartitionerPS(featureCount: Int)(psParallelism: Int): WorkerToPS[ModelType] => Int = {
       val partitionSize = Math.ceil(featureCount.toDouble / psParallelism).toInt
@@ -93,7 +76,6 @@ package object overrides {
       paramPartitioner
     }
 
-    val featureCount = input.numCols
     val serverLogic = new RangePSLogicWithClose[ModelType](
       featureCount,
       _ => throw new UnsupportedOperationException,
@@ -105,60 +87,7 @@ package object overrides {
       case PSToWorker(workerPartitionIndex, _) => workerPartitionIndex
     }
 
-    val workerLogic =  WorkerLogic.addPullLimiter(
-      new WorkerLogic[Either[IndexedDenseVector, IndexedDenseVector], ModelType, (DenseVector, DenseVector)] {
-
-        val unpredictedVecs = new mutable.Queue[(Long, DenseVector)]()
-        val unlabeledVecs = new mutable.HashMap[Long, DenseVector]()
-        val stashedModels = new mutable.HashMap[Long, ModelType]()
-        val stashedData = new mutable.Queue[(Long, DenseVector, DenseVector)]()
-
-        override def onRecv(
-          data: Either[IndexedDenseVector, IndexedDenseVector],
-          ps: ParameterServerClient[ModelType, (DenseVector, DenseVector)]
-        ): Unit = {
-          data match {
-            case Left(v) =>
-              // store unlabelled point and pull
-              unpredictedVecs.enqueue((v._1, v._2))
-              unlabeledVecs(v._1) = v._2
-            case Right(v) =>
-              // we got a labelled point
-              unlabeledVecs.remove(v._1) match {
-                case Some(unlabeledVector) => stashedData.enqueue((v._1, unlabeledVector, v._2))
-                case _ =>
-              }
-          }
-          ps.pull(0)
-        }
-
-        override def onPullRecv(
-          paramId: Int,
-          currentModel: ModelType,
-          ps: ParameterServerClient[ModelType, (DenseVector, DenseVector)]): Unit = {
-
-          while (unpredictedVecs.nonEmpty) {
-            val dataPoint = unpredictedVecs.dequeue()
-            val (prediction, localModel) = predictAndTrain(dataPoint._2, currentModel)
-            stashedModels(dataPoint._1) = localModel
-            ps.output((dataPoint._2, prediction))
-          }
-
-          while (stashedData.nonEmpty) {
-            val (index, dataPoint, target) = stashedData.dequeue()
-            stashedModels.remove(index) match {
-              case Some(localModel) => {
-                val newModel = update(dataPoint, target, localModel)
-                ps.push(0, newModel)
-              }
-              case _ =>
-            }
-
-          }
-        }
-      },
-      10000
-    )
+    val workerLogic = WorkerLogic.addPullLimiter(new PSWorkerLogic[ModelType](predictAndTrain, update), 10000)
 
     FlinkParameterServer.transformWithModelLoad(
       modelStream.map(x => (0, x)).broadcast
@@ -168,10 +97,71 @@ package object overrides {
       serverLogic,
       paramPartitioner,
       wInPartition,
-      inputStream.parallelism,
+      mixedStream.parallelism,
       1,
-      20000l
+      20000L
     )
   }
 
+
+  private class PSWorkerLogic[ModelType](
+          predictAndTrain: (DenseVector, ModelType) => (DenseVector, ModelType),
+          update: (DenseVector, DenseVector, ModelType) => ModelType
+  ) extends WorkerLogic[
+      Either[IndexedDenseVector, IndexedDenseVector],
+      ModelType,
+      (DenseVector, DenseVector)
+    ]{
+    val unpredictedVecs = new mutable.Queue[(Long, DenseVector)]()
+    val unlabeledVecs = new mutable.HashMap[Long, DenseVector]()
+    val stashedModels = new mutable.HashMap[Long, ModelType]()
+    val stashedData = new mutable.Queue[(Long, DenseVector, DenseVector)]()
+
+    override def onRecv(
+                         data: Either[IndexedDenseVector, IndexedDenseVector],
+                         ps: ParameterServerClient[ModelType, (DenseVector, DenseVector)]
+                       ): Unit = {
+      data match {
+        case Left(v) =>
+          // store unlabelled point and pull
+          unpredictedVecs.enqueue((v._1, v._2))
+          unlabeledVecs(v._1) = v._2
+        case Right(v) =>
+          // we got a labelled point
+          unlabeledVecs.remove(v._1) match {
+            case Some(unlabeledVector) => stashedData.enqueue((v._1, unlabeledVector, v._2))
+            case _ =>
+          }
+      }
+      ps.pull(0)
+    }
+
+    override def onPullRecv(
+                             paramId: Int,
+                             currentModel: ModelType,
+                             ps: ParameterServerClient[ModelType, (DenseVector, DenseVector)]): Unit = {
+
+      while (unpredictedVecs.nonEmpty) {
+        val dataPoint = unpredictedVecs.dequeue()
+        val (prediction, localModel) = predictAndTrain(dataPoint._2, currentModel)
+        stashedModels(dataPoint._1) = localModel
+        ps.output((dataPoint._2, prediction))
+      }
+
+      while (stashedData.nonEmpty) {
+        val (index, dataPoint, target) = stashedData.dequeue()
+        stashedModels.remove(index) match {
+          case Some(localModel) => {
+            val newModel = update(dataPoint, target, localModel)
+            ps.push(0, newModel)
+          }
+          case _ =>
+        }
+
+      }
+    }
+
+  }
+
 }
+
