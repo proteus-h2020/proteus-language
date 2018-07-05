@@ -59,7 +59,7 @@ extends FlatSpec
     while (streamIt.hasNext) {
       done = true
       val data = streamIt.next()
-      val err = result.slice(3*i, 3*(i+1))
+      val err = result.slice(3*i, 3*(i + 1))
 
       for (item <- (data zip err)) {
         item._1-item._2 should be (0.0 +- eps)
@@ -73,7 +73,6 @@ extends FlatSpec
 
     val env = StreamExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(4)
-//    env.setMaxParallelism(4
 
     val source1 = env.fromCollection(M1)
     val source2 = env.fromCollection(M2)
@@ -105,7 +104,7 @@ extends FlatSpec
     while (streamIt.hasNext) {
       done = true
       val data = streamIt.next()
-      val err = result.slice(len*i, len*(i+1))
+      val err = result.slice(len*i, len*(i + 1))
 
       for (item <- (data zip err)) {
         item._1-item._2 should be (0.0 +- eps)
@@ -121,7 +120,6 @@ extends FlatSpec
 
     val env = StreamExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(4)
-//    env.setMaxParallelism(4)
 
     val source1 = env.fromCollection(M1)
     val source2 = env.fromCollection(M2)
@@ -151,7 +149,7 @@ extends FlatSpec
     while (streamIt.hasNext) {
       done = true
       val data = streamIt.next()
-      val err = result.slice(len*i, len*(i+1))
+      val err = result.slice(len*i, len*(i + 1))
 
       for (item <- (data zip err)) {
         item._1-item._2 should be (0.0 +- eps)

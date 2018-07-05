@@ -38,6 +38,35 @@ class StreamingMatrix(
 
   private[lara] var tree: TraversableStreamingMatrix = Leaf(this)
 
+  private val appliedWindow = new AllWindowFunction[Array[Double], BreezeDenseMatrix[Double], GlobalWindow] {
+    override def apply(
+                        window: GlobalWindow,
+                        input: Iterable[Array[Double]],
+                        out: Collector[BreezeDenseMatrix[Double]])
+    : Unit = {
+      val data = new Array[Double](numRows * numCols)
+      val ret = BreezeDenseMatrix.create[Double](numRows, numCols, data)
+      for ((row, i) <- input.view.zipWithIndex) {
+        ret(i, ::) := BreezeDenseVector.create[Double](row, 0, 1, numCols).t
+      }
+      out.collect(ret)
+    }
+  }
+
+  private val appliedWindowOpt = new AllWindowFunction[Array[Double], (BreezeDenseMatrix[Double], Int), GlobalWindow] {
+    override def apply(
+                        window: GlobalWindow,
+                        input: Iterable[Array[Double]],
+                        out: Collector[(BreezeDenseMatrix[Double], Int)])
+    : Unit = {
+      val data = new Array[Double](numRows * numCols)
+      val ret = BreezeDenseMatrix.create[Double](numRows, numCols, data)
+      for ((row, i) <- input.view.zipWithIndex) {
+        ret(i, ::) := BreezeDenseVector.create[Double](row, 0, 1, numCols).t
+      }
+      out.collect((ret, tree.id))
+    }
+  }
 
   private[lara] def mapScalar(scalar: Double, f: (Double, Double) => Double): StreamingMatrix = {
     StreamingMatrix(ds.map(new MapFunction[Array[Double], Array[Double]] {
@@ -55,37 +84,11 @@ class StreamingMatrix(
     StreamingMatrix(
       ds
         .countWindowAll(numRows)
-        .apply(new AllWindowFunction[Array[Double], BreezeDenseMatrix[Double], GlobalWindow] {
-          override def apply(
-              window: GlobalWindow,
-              input: Iterable[Array[Double]],
-              out: Collector[BreezeDenseMatrix[Double]])
-          : Unit = {
-            val data = new Array[Double](numRows * numCols)
-            val ret = BreezeDenseMatrix.create[Double](numRows, numCols, data)
-            for ((row, i) <- input.view.zipWithIndex) {
-              ret(i, ::) := BreezeDenseVector.create[Double](row, 0, 1, numCols).t
-            }
-            out.collect(ret)
-          }
-        })
+        .apply(appliedWindow)
         .connect(
             that.ds
               .countWindowAll(that.numRows)
-              .apply(new AllWindowFunction[Array[Double], BreezeDenseMatrix[Double], GlobalWindow] {
-                override def apply(
-                    window: GlobalWindow,
-                    input: Iterable[Array[Double]],
-                    out: Collector[BreezeDenseMatrix[Double]])
-                : Unit = {
-                  val data = new Array[Double](that.numRows * that.numCols)
-                  val ret = BreezeDenseMatrix.create[Double](that.numRows, that.numCols, data)
-                  for ((row, i) <- input.view.zipWithIndex) {
-                    ret(i, ::) := BreezeDenseVector.create[Double](row, 0, 1, numCols).t
-                  }
-                  out.collect(ret)
-                }
-              })
+              .apply(appliedWindow)
         )
         .flatMap(new RichCoFlatMapFunction[BreezeDenseMatrix[Double], BreezeDenseMatrix[Double], Array[Double]] {
 
@@ -132,66 +135,29 @@ class StreamingMatrix(
   }
 
   private[lara] def transformMatrixOptimized(
-                                              sm2: StreamingMatrix,
-                                              sm3: StreamingMatrix,
-                                              f12: (BreezeDenseMatrix[Double], BreezeDenseMatrix[Double]) => BreezeDenseMatrix[Double],
-                                              f123: (BreezeDenseMatrix[Double], BreezeDenseMatrix[Double]) => BreezeDenseMatrix[Double])
+                                    sm2: StreamingMatrix,
+                                    sm3: StreamingMatrix,
+                                    f12: (BreezeDenseMatrix[Double],
+                                          BreezeDenseMatrix[Double]) => BreezeDenseMatrix[Double],
+                                    f123: (BreezeDenseMatrix[Double],
+                                          BreezeDenseMatrix[Double]) => BreezeDenseMatrix[Double])
   : StreamingMatrix = {
-    // TODO add asserts
     StreamingMatrix(
       ds
         .countWindowAll(numRows)
-        .apply(new AllWindowFunction[Array[Double], (BreezeDenseMatrix[Double], Int), GlobalWindow] {
-          override def apply(
-                              window: GlobalWindow,
-                              input: Iterable[Array[Double]],
-                              out: Collector[(BreezeDenseMatrix[Double], Int)])
-          : Unit = {
-            val data = new Array[Double](numRows * numCols)
-            val ret = BreezeDenseMatrix.create[Double](numRows, numCols, data)
-            for ((row, i) <- input.view.zipWithIndex) {
-              ret(i, ::) := BreezeDenseVector.create[Double](row, 0, 1, numCols).t
-            }
-            out.collect((ret, tree.id))
-          }
-        })
+        .apply(appliedWindowOpt)
         .union(
           sm2.ds
             .countWindowAll(sm2.numRows)
-            .apply(new AllWindowFunction[Array[Double], (BreezeDenseMatrix[Double], Int), GlobalWindow] {
-              override def apply(
-                                  window: GlobalWindow,
-                                  input: Iterable[Array[Double]],
-                                  out: Collector[(BreezeDenseMatrix[Double], Int)])
-              : Unit = {
-                val data = new Array[Double](sm2.numRows * sm2.numCols)
-                val ret = BreezeDenseMatrix.create[Double](sm2.numRows, sm2.numCols, data)
-                for ((row, i) <- input.view.zipWithIndex) {
-                  ret(i, ::) := BreezeDenseVector.create[Double](row, 0, 1, numCols).t
-                }
-                out.collect((ret, sm2.tree.id))
-              }
-            })
+            .apply(appliedWindowOpt)
         )
         .connect(
               sm3.ds
                 .countWindowAll(sm3.numRows)
-                .apply(new AllWindowFunction[Array[Double], (BreezeDenseMatrix[Double], Int), GlobalWindow] {
-                  override def apply(
-                                      window: GlobalWindow,
-                                      input: Iterable[Array[Double]],
-                                      out: Collector[(BreezeDenseMatrix[Double], Int)])
-                  : Unit = {
-                    val data = new Array[Double](sm3.numRows * sm3.numCols)
-                    val ret = BreezeDenseMatrix.create[Double](sm3.numRows, sm3.numCols, data)
-                    for ((row, i) <- input.view.zipWithIndex) {
-                      ret(i, ::) := BreezeDenseVector.create[Double](row, 0, 1, numCols).t
-                    }
-                    out.collect((ret, sm3.tree.id))
-                  }
-                })
+                .apply(appliedWindowOpt)
             )
-        .flatMap(new RichCoFlatMapFunction[(BreezeDenseMatrix[Double], Int), (BreezeDenseMatrix[Double], Int), Array[Double]] {
+        .flatMap(new RichCoFlatMapFunction[(BreezeDenseMatrix[Double], Int),
+          (BreezeDenseMatrix[Double], Int), Array[Double]] {
 
           @transient var q1: mutable.Queue[(BreezeDenseMatrix[Double], Int)] = _
           @transient var q2: mutable.Queue[(BreezeDenseMatrix[Double], Int)] = _
@@ -221,10 +187,12 @@ class StreamingMatrix(
           }
 
           override def flatMap1(in: (BreezeDenseMatrix[Double], Int), collector: Collector[Array[Double]]): Unit = {
-              if (in._2 == sm2.tree.id)
+              if (in._2 == sm2.tree.id){
                 q2.enqueue(in)
-              else
+              }
+              else {
                 q1.enqueue(in)
+              }
 
               if (q1.nonEmpty && q2.nonEmpty){
                 val m1 = q1.dequeue()
@@ -237,8 +205,9 @@ class StreamingMatrix(
                   for (i <- 0 until res.rows)
                     collector.collect(dat.slice(numCols * i, numCols * (i + 1)))
                 }
-                else
+                else {
                   q12.enqueue(m12)
+                }
               }
           }
         }), numCols, numRows)
@@ -261,7 +230,7 @@ class StreamingMatrix(
 
 
   def +(that: StreamingMatrix): StreamingMatrix = {
-    computeMatrixExpression(that, MatrixOp.+)
+    computeMatrixExpression(that, MatrixOp. +)
   }
 
   def -(that: StreamingMatrix): StreamingMatrix = {
@@ -298,8 +267,9 @@ class StreamingMatrix(
       tree = Leaf(sm)
       sm.ds
     }
-    else
+    else{
       ds
+    }
   }
 
 }

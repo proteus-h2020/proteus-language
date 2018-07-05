@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2017 The Proteus Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package eu.proteus.lara.streaming
 
 import MatrixOp.{MatrixOp, _}
@@ -11,7 +27,7 @@ sealed trait TraversableStreamingMatrix{
   //operator in each vertex
   var op: MatrixOp
 
-  //checking if this node can be computed in an optimized way. Currently, by checking if it is an add operator with child-op = mult
+  //checking if this node can be computed in an optimized way
   protected[streaming] def isOptimizable: Boolean
 
   //compute the expression represent from this vertex downwardly
@@ -47,7 +63,11 @@ case class Leaf(value: StreamingMatrix) extends TraversableStreamingMatrix {
 
 }
 
-case class Branch(left: TraversableStreamingMatrix, right: TraversableStreamingMatrix, operator: MatrixOp) extends TraversableStreamingMatrix{
+case class Branch(
+                   left: TraversableStreamingMatrix,
+                   right: TraversableStreamingMatrix,
+                   operator: MatrixOp) extends TraversableStreamingMatrix{
+
   final val id: Int = {
     TraversableStreamingMatrix.treeID+=1
     TraversableStreamingMatrix.treeID
@@ -56,8 +76,7 @@ case class Branch(left: TraversableStreamingMatrix, right: TraversableStreamingM
   var op: MatrixOp = operator
 
   override def isOptimizable: Boolean = {
-      if( left.op != load || right.op != load) true
-      else false
+      left.op != load || right.op != load
   }
 
    override def fuse(): StreamingMatrix = {
@@ -100,7 +119,7 @@ case class Branch(left: TraversableStreamingMatrix, right: TraversableStreamingM
 
   private def convert(matrixOp: MatrixOp)(): (DenseMatrix[Double], DenseMatrix[Double]) => DenseMatrix[Double] = {
     matrixOp match {
-      case MatrixOp.+ => _ +:+ _
+      case MatrixOp. + => _ +:+ _
       case MatrixOp.- => _ -:- _
       case MatrixOp.* => _ *:* _
       case MatrixOp./ => _ /:/ _
