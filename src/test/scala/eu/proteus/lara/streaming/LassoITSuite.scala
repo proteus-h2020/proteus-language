@@ -16,12 +16,28 @@
 
 package eu.proteus.lara.streaming
 
+import java.util.{Properties, HashMap => JHashMap, Map => JMap}
+
 import breeze.linalg.{diag, inv, DenseMatrix => BreezeDenseMatrix, DenseVector => BreezeDenseVector}
 import breeze.numerics.{abs, sqrt}
+import eu.proteus.job.operations.data.model.{CoilMeasurement, SensorMeasurement1D, SensorMeasurement2D}
+import eu.proteus.job.operations.data.serializer.CoilMeasurementKryoSerializer
+import eu.proteus.job.operations.data.serializer.schema.UntaggedObjectSerializationSchema
+import eu.proteus.job.operations.lasso.{AggregateFlatnessValuesWindowFunction, AggregateMeasurementValuesWindowFunction}
 import eu.proteus.lara.overrides._
+import org.apache.flink.ml.math.{Vector, BreezeVectorConverter}
 import eu.proteus.lara.streaming.flink.FlinkTestBase
+import eu.proteus.solma.lasso.LassoStreamEvent.LassoStreamEvent
+import org.apache.flink.streaming.api.functions.co.CoFlatMapFunction
+import org.apache.flink.streaming.api.windowing.assigners.ProcessingTimeSessionWindows
+import org.apache.flink.streaming.api.windowing.time.Time
+import org.apache.flink.util.Collector
+//import eu.proteus.solma
+import org.apache.flink.runtime.state.memory.MemoryStateBackend
+import org.apache.flink.streaming.api.TimeCharacteristic
 import org.apache.flink.streaming.api.scala._
-import org.scalatest.{BeforeAndAfterAll, FlatSpec, Matchers}
+import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer010
+import org.scalatest.{FlatSpec, Matchers}
 
 import scala.collection.mutable
 import scala.io.Source
@@ -33,62 +49,173 @@ class LassoITSuite
 
   import LassoITSuite._
 
-  it should "Perform Lasso for Nursery.csv dataset" in {
+//  it should "Perform Lasso for Nursery.csv dataset" in {
+//
+//    val env = StreamExecutionEnvironment.getExecutionEnvironment
+//    env.setParallelism(4)
+//
+//    def lineToInstance(line: String): (BreezeDenseVector[Double], BreezeDenseVector[Double]) ={
+//      val v = line.split(";").map(_.trim.toDouble)
+//      (BreezeDenseVector(v.init), BreezeDenseVector(Array(v(8))))
+//    }
+//
+//    val featureCount = 8
+//    val initA = 1.0
+//    val initB = 0.5
+//
+//    val initModel: LassoModel = (
+//      diag(BreezeDenseVector.fill(featureCount){initA}),
+//      BreezeDenseVector.fill(featureCount){initB}, 1.0
+//    )
+//
+//    val dataSemiShuffled = shuffleData("/nursery.csv", lineToInstance)
+//
+//    val mixedStream: DataStream[Either[IndexedDenseVector, IndexedDenseVector]] = env.fromCollection(dataSemiShuffled)
+//    val ds = withFeedback(env, mixedStream, featureCount, initModel)(predictAndTrain, merger, update)
+//             .print.setParallelism(1)
+//
+//    env.execute()
+//  }
+//
+//
+//  it should "Perform Lasso for test.csv dataset" in{
+//    val env = StreamExecutionEnvironment.getExecutionEnvironment
+//    env.setParallelism(4)
+//    val featureCount = 76
+//    val initA = 1.0
+//    val initB = 0.0
+//    val initGamma = 20.0
+//
+//    val initModel: LassoModel = (
+//      diag(BreezeDenseVector.fill(featureCount){initA}),
+//      BreezeDenseVector.fill(featureCount){initB},
+//      initGamma
+//    )
+//
+//    def lineToInstance(line: String): (BreezeDenseVector[Double], BreezeDenseVector[Double]) ={
+//      val params = line.split(",")
+//      val label = params(2).toDouble
+//      val features = params.slice(3, params.length)
+//      val vector = BreezeDenseVector[Double](features.map(x => x.toDouble))
+//      (vector, BreezeDenseVector(Array(label)))
+//    }
+//
+//    val dataSemiShuffled = shuffleData("/tests.csv", lineToInstance)
+//
+//    val mixedStream: DataStream[Either[IndexedDenseVector, IndexedDenseVector]] = env.fromCollection(dataSemiShuffled)
+//    val ds = withFeedback(env, mixedStream, featureCount, initModel)(predictAndTrain, merger, update)
+//      .print.setParallelism(1)
+//
+//    env.execute()
+//  }
 
+
+  it should "Perform Lasso with data source from Kafka " in{
     val env = StreamExecutionEnvironment.getExecutionEnvironment
     env.setParallelism(4)
 
-    def lineToInstance(line: String): (BreezeDenseVector[Double], BreezeDenseVector[Double]) ={
-      val v = line.split(";").map(_.trim.toDouble)
-      (BreezeDenseVector(v.init), BreezeDenseVector(Array(v(8))))
-    }
+    //set memory backend as state backend
+    val memoryBackendMBSize = 20
+    val ONE_MEGABYTE = 1024 * 1024
+    val stateBackend = new MemoryStateBackend(memoryBackendMBSize * ONE_MEGABYTE, true)
+    env.setStateBackend(stateBackend)
 
-    val featureCount = 8
-    val initA = 1.0
-    val initB = 0.5
+    env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
 
-    val initModel: LassoModel = (
-      diag(BreezeDenseVector.fill(featureCount){initA}),
-      BreezeDenseVector.fill(featureCount){initB}, 1.0
+    // kafka config
+    val kafkaBootstrapServer = "localhost:9092"
+    val kafkaTopic = "realtime"
+    val flatnessDataKafkaTopic = "realtimeFlatness"
+
+    val cfg = env.getConfig
+
+    // register types
+    cfg.registerKryoType(classOf[CoilMeasurement])
+    cfg.registerKryoType(classOf[SensorMeasurement2D])
+    cfg.registerKryoType(classOf[SensorMeasurement1D])
+
+    // register serializers
+    env.addDefaultKryoSerializer(classOf[CoilMeasurement], classOf[CoilMeasurementKryoSerializer])
+    env.addDefaultKryoSerializer(classOf[SensorMeasurement2D], classOf[CoilMeasurementKryoSerializer])
+    env.addDefaultKryoSerializer(classOf[SensorMeasurement1D], classOf[CoilMeasurementKryoSerializer])
+
+    env.addDefaultKryoSerializer(classOf[mutable.Queue[_]],
+      classOf[com.twitter.chill.TraversableSerializer[_, mutable.Queue[_]]])
+
+    implicit val inputTypeInfo = createTypeInformation[CoilMeasurement]
+    val inputSchema = new UntaggedObjectSerializationSchema[CoilMeasurement](env.getConfig)
+    val properties = new Properties
+    properties.setProperty("bootstrap.servers", kafkaBootstrapServer)
+
+    val realTimeSource: DataStream[CoilMeasurement] = env.addSource(
+      new FlinkKafkaConsumer010[CoilMeasurement](
+        kafkaTopic,
+        inputSchema,
+        properties
+
+      )
     )
 
-    val dataSemiShuffled = shuffleData("/nursery.csv", lineToInstance)
+    val flatnessSource: DataStream[CoilMeasurement] = env.addSource(new FlinkKafkaConsumer010[CoilMeasurement](
+      flatnessDataKafkaTopic,
+      inputSchema,
+      properties))
 
-    val mixedStream: DataStream[Either[IndexedDenseVector, IndexedDenseVector]] = env.fromCollection(dataSemiShuffled)
-    val ds = withFeedback(env, mixedStream, featureCount, initModel)(predictAndTrain, merger, update)
-             .print.setParallelism(1)
+    val varId: Int = 28
+    val allowedFlatnessLateness = 10000
+    val allowedRealtimeLateness = 10000
+        val featureCount = 76
+        val initA = 1.0
+        val initB = 0.0
+        val initGamma = 20.0
 
-    env.execute()
-  }
+        val initModel: LassoModel = (
+          diag(BreezeDenseVector.fill(featureCount){initA}),
+          BreezeDenseVector.fill(featureCount){initB},
+          initGamma
+        )
 
+    val processedFlatnessStream = flatnessSource.filter(x => x.slice.head == varId)
+      .keyBy(x => x.coilId)
+      .window(ProcessingTimeSessionWindows.withGap(Time.seconds(allowedFlatnessLateness)))
+      .process(new AggregateFlatnessValuesWindowFunction())
 
-  it should "Perform Lasso for test.csv dataset" in{
-    val env = StreamExecutionEnvironment.getExecutionEnvironment
-    env.setParallelism(4)
-    val featureCount = 76
-    val initA = 1.0
-    val initB = 0.0
-    val initGamma = 20.0
+    val processedMeasurementStream = realTimeSource.keyBy(x => getKeyByCoilAndX(x))
+      .window(ProcessingTimeSessionWindows.withGap(Time.seconds(allowedRealtimeLateness)))
+      .process(new AggregateMeasurementValuesWindowFunction(featureCount))
 
-    val initModel: LassoModel = (
-      diag(BreezeDenseVector.fill(featureCount){initA}),
-      BreezeDenseVector.fill(featureCount){initB},
-      initGamma
-    )
+    val connectedStreams = processedMeasurementStream.connect(processedFlatnessStream)
 
-    def lineToInstance(line: String): (BreezeDenseVector[Double], BreezeDenseVector[Double]) ={
-      val params = line.split(",")
-      val label = params(2).toDouble
-      val features = params.slice(3, params.length)
-      val vector = BreezeDenseVector[Double](features.map(x => x.toDouble))
-      (vector, BreezeDenseVector(Array(label)))
+    val allEvents = connectedStreams.flatMap(new CoFlatMapFunction[LassoStreamEvent,
+      LassoStreamEvent, LassoStreamEvent]() {
+
+      override def flatMap1(value: LassoStreamEvent, out: Collector[LassoStreamEvent]): Unit = {
+        out.collect(value)
+      }
+
+      override def flatMap2(value: LassoStreamEvent, out: Collector[LassoStreamEvent]): Unit = {
+        out.collect(value)
+      }
+    })
+
+    val mixedStream: DataStream[Either[(Long, DenseVector), (Long, DenseVector)]] = allEvents.map{
+      x =>
+        x match {
+          case Right(label) =>
+            val id = label.label
+            val l = BreezeDenseVector(label.labels.map(x => x._2).toArray)
+            Right((id, l))
+
+          case Left(datapoint) =>
+            val id = datapoint.pos._1
+            val data = BreezeDenseVector(datapoint.data.map(x => x._2).toArray)
+
+            Left((id, data))
+        }
     }
 
-    val dataSemiShuffled = shuffleData("/tests.csv", lineToInstance)
-
-    val mixedStream: DataStream[Either[IndexedDenseVector, IndexedDenseVector]] = env.fromCollection(dataSemiShuffled)
     val ds = withFeedback(env, mixedStream, featureCount, initModel)(predictAndTrain, merger, update)
-      .print.setParallelism(1)
+          .print.setParallelism(1)
 
     env.execute()
   }
@@ -97,7 +224,13 @@ class LassoITSuite
 
 object LassoITSuite{
   type LassoModel = (BreezeDenseMatrix[Double], BreezeDenseVector[Double], Double)
-
+  def getKeyByCoilAndX(mesurement: CoilMeasurement): (Int, Double) = {
+    val xCoord = mesurement match {
+      case s1d: SensorMeasurement1D => s1d.x
+      case s2d: SensorMeasurement2D => s2d.x
+    }
+    (mesurement.coilId, xCoord)
+  }
   def update(x_t: BreezeDenseVector[Double], label: BreezeDenseVector[Double], model: LassoModel) : LassoModel = {
     val gamma = model._3
 
