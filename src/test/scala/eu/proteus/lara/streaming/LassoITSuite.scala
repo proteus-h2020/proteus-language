@@ -25,10 +25,12 @@ import eu.proteus.job.operations.data.serializer.CoilMeasurementKryoSerializer
 import eu.proteus.job.operations.data.serializer.schema.UntaggedObjectSerializationSchema
 import eu.proteus.job.operations.lasso.{AggregateFlatnessValuesWindowFunction, AggregateMeasurementValuesWindowFunction}
 import eu.proteus.lara.overrides._
-import org.apache.flink.ml.math.{Vector, BreezeVectorConverter}
+import org.apache.flink.ml.math.{BreezeVectorConverter, Vector}
 import eu.proteus.lara.streaming.flink.FlinkTestBase
 import eu.proteus.solma.lasso.LassoStreamEvent.LassoStreamEvent
+import grizzled.slf4j.Logger
 import org.apache.flink.streaming.api.functions.co.CoFlatMapFunction
+import org.apache.flink.streaming.api.functions.sink.{RichSinkFunction, SinkFunction}
 import org.apache.flink.streaming.api.windowing.assigners.ProcessingTimeSessionWindows
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.util.Collector
@@ -47,67 +49,86 @@ class LassoITSuite
     with Matchers
     with FlinkTestBase {
 
+
   import LassoITSuite._
 
-//  it should "Perform Lasso for Nursery.csv dataset" in {
-//
-//    val env = StreamExecutionEnvironment.getExecutionEnvironment
-//    env.setParallelism(4)
-//
-//    def lineToInstance(line: String): (BreezeDenseVector[Double], BreezeDenseVector[Double]) ={
-//      val v = line.split(";").map(_.trim.toDouble)
-//      (BreezeDenseVector(v.init), BreezeDenseVector(Array(v(8))))
-//    }
-//
-//    val featureCount = 8
-//    val initA = 1.0
-//    val initB = 0.5
-//
-//    val initModel: LassoModel = (
-//      diag(BreezeDenseVector.fill(featureCount){initA}),
-//      BreezeDenseVector.fill(featureCount){initB}, 1.0
-//    )
-//
-//    val dataSemiShuffled = shuffleData("/nursery.csv", lineToInstance)
-//
-//    val mixedStream: DataStream[Either[IndexedDenseVector, IndexedDenseVector]] = env.fromCollection(dataSemiShuffled)
-//    val ds = withFeedback(env, mixedStream, featureCount, initModel)(predictAndTrain, merger, update)
-//             .print.setParallelism(1)
-//
-//    env.execute()
-//  }
-//
-//
-//  it should "Perform Lasso for test.csv dataset" in{
-//    val env = StreamExecutionEnvironment.getExecutionEnvironment
-//    env.setParallelism(4)
-//    val featureCount = 76
-//    val initA = 1.0
-//    val initB = 0.0
-//    val initGamma = 20.0
-//
-//    val initModel: LassoModel = (
-//      diag(BreezeDenseVector.fill(featureCount){initA}),
-//      BreezeDenseVector.fill(featureCount){initB},
-//      initGamma
-//    )
-//
-//    def lineToInstance(line: String): (BreezeDenseVector[Double], BreezeDenseVector[Double]) ={
-//      val params = line.split(",")
-//      val label = params(2).toDouble
-//      val features = params.slice(3, params.length)
-//      val vector = BreezeDenseVector[Double](features.map(x => x.toDouble))
-//      (vector, BreezeDenseVector(Array(label)))
-//    }
-//
-//    val dataSemiShuffled = shuffleData("/tests.csv", lineToInstance)
-//
-//    val mixedStream: DataStream[Either[IndexedDenseVector, IndexedDenseVector]] = env.fromCollection(dataSemiShuffled)
-//    val ds = withFeedback(env, mixedStream, featureCount, initModel)(predictAndTrain, merger, update)
-//      .print.setParallelism(1)
-//
-//    env.execute()
-//  }
+  it should "Perform Lasso for Nursery.csv dataset" in {
+
+    val env = StreamExecutionEnvironment.getExecutionEnvironment
+    env.setParallelism(4)
+
+    def lineToInstance(line: String): (BreezeDenseVector[Double], BreezeDenseVector[Double]) ={
+      val v = line.split(";").map(_.trim.toDouble)
+      (BreezeDenseVector(v.init), BreezeDenseVector(Array(v(8))))
+    }
+
+    val featureCount = 8
+    val initA = 1.0
+    val initB = 0.5
+
+    val initModel: LassoModel = (
+      diag(BreezeDenseVector.fill(featureCount){initA}),
+      BreezeDenseVector.fill(featureCount){initB}, 1.0
+    )
+
+    val (dataSemiShuffled, labelsCount) = shuffleData("/nursery.csv", lineToInstance)
+
+    val mixedStream: DataStream[Either[IndexedDenseVector, IndexedDenseVector]] = env.fromCollection(dataSemiShuffled)
+    val ds = withFeedback(env, mixedStream, featureCount, initModel)(predictAndTrain, merger, update)
+        .addSink(new RichSinkFunction[Either[(DenseVector, DenseVector), (Int, (DenseMatrix, DenseVector, Double))]]() {
+          var counter = 0
+          override def invoke(value: Either[(DenseVector, DenseVector), (Int, (DenseMatrix, DenseVector, Double))], context: SinkFunction.Context[_]): Unit = {
+            value match {
+               case Left(_) =>
+                counter += 1
+                LOG.debug(s"Current count: $counter/$labelsCount")
+               case Right(_) =>
+            }
+          }
+
+          override def close(): Unit = {
+            if (counter != labelsCount) {
+              LOG.error(s"Error expected $labelsCount but got $counter")
+            } else {
+              LOG.info(s"all good, processed $counter")
+            }
+          }
+        }).setParallelism(1)
+
+    env.execute()
+  }
+
+
+  it should "Perform Lasso for test.csv dataset" in{
+    val env = StreamExecutionEnvironment.getExecutionEnvironment
+    env.setParallelism(4)
+    val featureCount = 76
+    val initA = 1.0
+    val initB = 0.0
+    val initGamma = 20.0
+
+    val initModel: LassoModel = (
+      diag(BreezeDenseVector.fill(featureCount){initA}),
+      BreezeDenseVector.fill(featureCount){initB},
+      initGamma
+    )
+
+    def lineToInstance(line: String): (BreezeDenseVector[Double], BreezeDenseVector[Double]) ={
+      val params = line.split(",")
+      val label = params(2).toDouble
+      val features = params.slice(3, params.length)
+      val vector = BreezeDenseVector[Double](features.map(x => x.toDouble))
+      (vector, BreezeDenseVector(Array(label)))
+    }
+
+    val (dataSemiShuffled, _) = shuffleData("/tests.csv", lineToInstance)
+
+    val mixedStream: DataStream[Either[IndexedDenseVector, IndexedDenseVector]] = env.fromCollection(dataSemiShuffled)
+    val ds = withFeedback(env, mixedStream, featureCount, initModel)(predictAndTrain, merger, update)
+      .print.setParallelism(1)
+
+    env.execute()
+  }
 
 
   it should "Perform Lasso with data source from Kafka " in{
@@ -217,12 +238,14 @@ class LassoITSuite
     val ds = withFeedback(env, mixedStream, featureCount, initModel)(predictAndTrain, merger, update)
           .print.setParallelism(1)
 
+    val str = env.getExecutionPlan
     env.execute()
   }
 
 }
 
 object LassoITSuite{
+  val LOG = Logger(getClass)
   type LassoModel = (BreezeDenseMatrix[Double], BreezeDenseVector[Double], Double)
   def getKeyByCoilAndX(mesurement: CoilMeasurement): (Int, Double) = {
     val xCoord = mesurement match {
@@ -261,7 +284,7 @@ object LassoITSuite{
   private def shuffleData(
                    filePath: String,
                    lineToInstance: String=>(BreezeDenseVector[Double], BreezeDenseVector[Double])
-                 ): mutable.ArrayBuffer[Either[IndexedDenseVector, IndexedDenseVector]] = {
+                 ): (mutable.ArrayBuffer[Either[IndexedDenseVector, IndexedDenseVector]], Int) = {
 
     val rnd = scala.util.Random
     val bufferedSource = Source.fromInputStream(getClass.getResourceAsStream(filePath))
@@ -315,7 +338,8 @@ object LassoITSuite{
       }
     }
 
-  dataSemiShuffled
+    (dataSemiShuffled, labelled.size)
   }
 }
+
 

@@ -22,6 +22,7 @@ import eu.proteus.lara.streaming.StreamingMatrix
 import hu.sztaki.ilab.ps.entities.{PSToWorker, Pull, Push, WorkerToPS}
 import hu.sztaki.ilab.ps.server.RangePSLogicWithClose
 import hu.sztaki.ilab.ps.{FlinkParameterServer, ParameterServerClient, WorkerLogic}
+import org.apache.flink.api.common.functions.MapFunction
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.streaming.api.scala._
 
@@ -60,7 +61,7 @@ package object overrides {
     update: (DenseVector, DenseVector, ModelType) => ModelType
   ): DataStream[Either[(DenseVector, DenseVector), (Int, ModelType)]] = {
 
-    val modelStream = env.fromCollection(List(model))
+    val modelStream = env.fromCollection(List(model)).startNewChain()
 
     def rangePartitionerPS(featureCount: Int)(psParallelism: Int): WorkerToPS[ModelType] => Int = {
       val partitionSize = Math.ceil(featureCount.toDouble / psParallelism).toInt
@@ -87,10 +88,12 @@ package object overrides {
       case PSToWorker(workerPartitionIndex, _) => workerPartitionIndex
     }
 
-    val workerLogic = WorkerLogic.addPullLimiter(new PSWorkerLogic[ModelType](predictAndTrain, update), 10000)
+    val workerLogic = WorkerLogic.addPullLimiter(new PSWorkerLogic[ModelType](predictAndTrain, update), 500)
 
     FlinkParameterServer.transformWithModelLoad(
-      modelStream.map(x => (0, x)).broadcast
+      modelStream.broadcast.map(new MapFunction[ModelType, (Int, ModelType)] {
+        override def map(t: ModelType): (Int, ModelType) = (0, t)
+      }).setParallelism(mixedStream.parallelism)
     )(
       mixedStream,
       workerLogic,
