@@ -145,8 +145,8 @@ class LassoITSuite
 
     // kafka config
     val kafkaBootstrapServer = "localhost:9092"
-    val kafkaTopic = "realtime"
-    val flatnessDataKafkaTopic = "realtimeFlatness"
+    val kafkaTopic = "realtime4"
+    val flatnessDataKafkaTopic = "realtimeFlatness4"
 
     val cfg = env.getConfig
 
@@ -168,42 +168,49 @@ class LassoITSuite
     val properties = new Properties
     properties.setProperty("bootstrap.servers", kafkaBootstrapServer)
 
-    val realTimeSource: DataStream[CoilMeasurement] = env.addSource(
-      new FlinkKafkaConsumer010[CoilMeasurement](
-        kafkaTopic,
-        inputSchema,
-        properties
+    val realtimeConsumer = new FlinkKafkaConsumer010[CoilMeasurement](
+      kafkaTopic,
+      inputSchema,
+      properties
 
-      )
     )
+    realtimeConsumer.setStartFromEarliest()
 
-    val flatnessSource: DataStream[CoilMeasurement] = env.addSource(new FlinkKafkaConsumer010[CoilMeasurement](
+    val realTimeSource: DataStream[CoilMeasurement] = env.addSource(realtimeConsumer)
+
+    val flatnessConsumer = new FlinkKafkaConsumer010[CoilMeasurement](
       flatnessDataKafkaTopic,
       inputSchema,
-      properties))
+      properties)
+
+    flatnessConsumer.setStartFromEarliest()
+
+    val flatnessSource: DataStream[CoilMeasurement] = env.addSource(flatnessConsumer)
 
     val varId: Int = 28
-    val allowedFlatnessLateness = 10000
-    val allowedRealtimeLateness = 10000
-        val featureCount = 76
-        val initA = 1.0
-        val initB = 0.0
-        val initGamma = 20.0
+    val allowedFlatnessLateness = 5
+    val allowedRealtimeLateness = 5
+    val featureCount = 76
+    val initA = 1.0
+    val initB = 0.0
+    val initGamma = 20.0
 
-        val initModel: LassoModel = (
-          diag(BreezeDenseVector.fill(featureCount){initA}),
-          BreezeDenseVector.fill(featureCount){initB},
-          initGamma
-        )
+    val initModel: LassoModel = (
+      diag(BreezeDenseVector.fill(featureCount){initA}),
+      BreezeDenseVector.fill(featureCount){initB},
+      initGamma
+    )
+
+
+    val processedMeasurementStream = realTimeSource.keyBy(x => getKeyByCoilAndX(x))
+      .window(ProcessingTimeSessionWindows.withGap(Time.seconds(allowedRealtimeLateness)))
+      .process(new AggregateMeasurementValuesWindowFunction(featureCount))
 
     val processedFlatnessStream = flatnessSource.filter(x => x.slice.head == varId)
       .keyBy(x => x.coilId)
       .window(ProcessingTimeSessionWindows.withGap(Time.seconds(allowedFlatnessLateness)))
       .process(new AggregateFlatnessValuesWindowFunction())
 
-    val processedMeasurementStream = realTimeSource.keyBy(x => getKeyByCoilAndX(x))
-      .window(ProcessingTimeSessionWindows.withGap(Time.seconds(allowedRealtimeLateness)))
-      .process(new AggregateMeasurementValuesWindowFunction(featureCount))
 
     val connectedStreams = processedMeasurementStream.connect(processedFlatnessStream)
 
@@ -219,28 +226,49 @@ class LassoITSuite
       }
     })
 
-    val mixedStream: DataStream[Either[(Long, DenseVector), (Long, DenseVector)]] = allEvents.map{
+    val mixedStream: DataStream[Either[(Long, DenseVector), (Long, DenseVector)]] = allEvents.flatMap{
       x =>
+
         x match {
           case Right(label) =>
-            val id = label.label
-            val l = BreezeDenseVector(label.labels.map(x => x._2).toArray)
-            Right((id, l))
+            if (label.data(0).equals(Double.NaN))
+              None
+            else{
+              val id = label.label
+              val l = BreezeDenseVector(label.labels.map(x => x._2).toArray)
+              Some(Right((id, l)))
+            }
 
           case Left(datapoint) =>
             val id = datapoint.pos._1
             val data = BreezeDenseVector(datapoint.data.map(x => x._2).toArray)
-
-            Left((id, data))
+            Some(Left((id, data)))
         }
     }
 
-    val ds = withFeedback(env, mixedStream, featureCount, initModel)(predictAndTrain, merger, update)
-          .print.setParallelism(1)
+    val ds =
+      withFeedback(env, mixedStream, featureCount, initModel)(predictAndTrain, merger, update)
+        .addSink(new RichSinkFunction[Either[(DenseVector, DenseVector), (Int, (DenseMatrix, DenseVector, Double))]]() {
+          var counter = 0
+          override def invoke(value: Either[(DenseVector, DenseVector), (Int, (DenseMatrix, DenseVector, Double))], context: SinkFunction.Context[_]): Unit = {
+            value match {
+              case Left(_) =>
+                counter += 1
+                LOG.debug(s"Current count: $counter  and timestamp " + System.nanoTime())
+                if (counter == 500)
+                  System.exit(1)
+              case Right(_) =>
+            }
+          }
 
-    val str = env.getExecutionPlan
+          override def close(): Unit = {
+            LOG.info(s"all good, processed $counter")
+          }
+        }).setParallelism(1)
+
     env.execute()
   }
+
 
 }
 
