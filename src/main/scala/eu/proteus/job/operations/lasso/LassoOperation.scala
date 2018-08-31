@@ -80,7 +80,8 @@ class AggregateMeasurementValuesWindowFunction(val featureCount: Int) extends Pr
 
     var breezeVector = BreezeVector.zeros[Double](featureCount)
     (1 to featureCount).foreach{ x =>
-      breezeVector(x - 1) = Double.NaN
+//      breezeVector(x - 1) = Double.NaN
+      breezeVector(x - 1) = FeatureConversion.defaultValues(x)
     }
 
     var counter = 0
